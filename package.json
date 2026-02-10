@@ -1,0 +1,27 @@
+{
+  "name": "ride-oasis",
+  "version": "1.0.0",
+  "description": "コンビニ等の公式サイトから店舗情報を収集し、住所正規化と座標付与を行って BigQuery のマートとして提供する補給地点DBです。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "playwright": "playwright",
+    "pw:test": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/ochanuco/ride-oasis.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ochanuco/ride-oasis/issues"
+  },
+  "homepage": "https://github.com/ochanuco/ride-oasis#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "playwright": "^1.58.2"
+  }
+}
