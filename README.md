@@ -41,6 +41,14 @@
 - `terraform/`: IaC
 - `skills/`: 本リポジトリ用の作業スキル
 
+## 使い方（取得）
+
+都道府県コードで絞って NDJSON を出力します。
+
+```bash
+node scripts/7eleven_pref_ndjson.js --pref 27
+```
+
 ## 注意事項
 
 - クローリング対象サイトの利用規約/robots を確認し、アクセス頻度を制限します。
