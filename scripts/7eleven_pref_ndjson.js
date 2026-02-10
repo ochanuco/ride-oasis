@@ -70,9 +70,8 @@ async function captureHeaders(page) {
   return headers;
 }
 
-async function fetchPref(page, headers, prefCode) {
+async function fetchPref(page, headers, prefCode, fields) {
   const nowKey = jstNowKey();
-  const fields = ['kyo_id', 'name', 'addr_1', 'zip_code', 'col_5', 'pre_code', 'city_code'];
   const searchConditions = [
     { field: 'pre_code', value: prefCode, comparison_operator: '=' },
     { field: 'col_2', value: nowKey, comparison_operator: '<=' },
@@ -131,34 +130,155 @@ async function main() {
     locale: 'ja-JP'
   });
 
-  const headers = await captureHeaders(page);
-  const scrapedAt = new Date().toISOString();
-  const sourceUrl = 'https://seven-eleven.areamarker.com/711map/top';
+  let aborted = false;
+  process.on('SIGINT', () => {
+    aborted = true;
+    console.error('SIGINT: stopping after current item...');
+  });
 
-  const onlyPref = parsePrefArg();
-  const targets = onlyPref ? [onlyPref] : PREF_CODES;
+  try {
+    const headers = await captureHeaders(page);
+    const scrapedAt = new Date().toISOString();
+    const sourceUrl = 'https://seven-eleven.areamarker.com/711map/top';
+    const svcRes = await page.request.get('https://seven-eleven.areamarker.com/711map/data/serviceCol.json');
+    const svc = await svcRes.json();
+    const serviceMap = new Map(svc.map((s) => [s.id, s.name]));
+    const baseFields = ['kyo_id', 'name', 'addr_1', 'zip_code', 'col_5', 'pre_code', 'city_code'];
+    const detailFields = [
+      'col_16',  // 24時間営業
+      'col_79',  // 月曜営業開始
+      'col_80',  // 月曜営業終了
+      'col_82',  // 火曜営業開始
+      'col_83',  // 火曜営業終了
+      'col_85',  // 水曜営業開始
+      'col_86',  // 水曜営業終了
+      'col_88',  // 木曜営業開始
+      'col_89',  // 木曜営業終了
+      'col_91',  // 金曜営業開始
+      'col_92',  // 金曜営業終了
+      'col_94',  // 土曜営業開始
+      'col_95',  // 土曜営業終了
+      'col_97',  // 日曜営業開始
+      'col_98',  // 日曜営業終了
+      'col_100', // 祝日営業開始
+      'col_101'  // 祝日営業終了
+    ];
+    const serviceFields = svc.map((s) => s.id);
+    const fields = Array.from(new Set([...baseFields, ...detailFields, ...serviceFields]));
 
-  for (const pref of targets) {
-    const hits = await fetchPref(page, headers, pref);
-    const outPath = path.join(outDir, `stores_7eleven_pref_${pref}.ndjson`);
-    const lines = hits.map((h) => {
-      const f = h.fields || {};
-      return JSON.stringify({
-        store_id: f.kyo_id || null,
-        store_name: f.name || null,
-        address_raw: f.addr_1 || null,
-        postal_code: f.zip_code || null,
-        source_url: sourceUrl,
-        scraped_at: scrapedAt,
-        payload_json: h
-      });
-    });
-    fs.writeFileSync(outPath, lines.join('\n') + (lines.length ? '\n' : ''));
-    console.log(`${pref}: ${lines.length} -> ${outPath}`);
-    await sleep(500);
+    const onlyPref = parsePrefArg();
+    const targets = onlyPref ? [onlyPref] : PREF_CODES;
+
+    for (const pref of targets) {
+      if (aborted) break;
+      const hits = await fetchPref(page, headers, pref, fields);
+      const outPath = path.join(outDir, `stores_7eleven_pref_${pref}.ndjson`);
+      const lines = [];
+      const total = hits.length;
+      let idx = 0;
+      for (const h of hits) {
+        idx += 1;
+        console.log(`${pref}: detail ${idx}/${total}`);
+        if (aborted) break;
+        const f = h.fields || {};
+        let hours24 = null;
+        let hoursMonStart = null;
+        let hoursMonEnd = null;
+        let hoursTueStart = null;
+        let hoursTueEnd = null;
+        let hoursWedStart = null;
+        let hoursWedEnd = null;
+        let hoursThuStart = null;
+        let hoursThuEnd = null;
+        let hoursFriStart = null;
+        let hoursFriEnd = null;
+        let hoursSatStart = null;
+        let hoursSatEnd = null;
+        let hoursSunStart = null;
+        let hoursSunEnd = null;
+        let hoursHolidayStart = null;
+        let hoursHolidayEnd = null;
+        let services = null;
+
+        hours24 = f.col_16 === '1' ? true : false;
+        hoursMonStart = f.col_79 || null;
+        hoursMonEnd = f.col_80 || null;
+        hoursTueStart = f.col_82 || null;
+        hoursTueEnd = f.col_83 || null;
+        hoursWedStart = f.col_85 || null;
+        hoursWedEnd = f.col_86 || null;
+        hoursThuStart = f.col_88 || null;
+        hoursThuEnd = f.col_89 || null;
+        hoursFriStart = f.col_91 || null;
+        hoursFriEnd = f.col_92 || null;
+        hoursSatStart = f.col_94 || null;
+        hoursSatEnd = f.col_95 || null;
+        hoursSunStart = f.col_97 || null;
+        hoursSunEnd = f.col_98 || null;
+        hoursHolidayStart = f.col_100 || null;
+        hoursHolidayEnd = f.col_101 || null;
+        if (!hours24 && !hoursMonStart && !hoursMonEnd && !hoursHolidayStart && !hoursHolidayEnd) {
+          console.log(
+            `hours missing kyo_id=${f.kyo_id || ''} col_16=${f.col_16 || ''} ` +
+            `col_79=${f.col_79 || ''} col_80=${f.col_80 || ''} ` +
+            `col_82=${f.col_82 || ''} col_83=${f.col_83 || ''} ` +
+            `col_85=${f.col_85 || ''} col_86=${f.col_86 || ''} ` +
+            `col_88=${f.col_88 || ''} col_89=${f.col_89 || ''} ` +
+            `col_91=${f.col_91 || ''} col_92=${f.col_92 || ''} ` +
+            `col_94=${f.col_94 || ''} col_95=${f.col_95 || ''} ` +
+            `col_97=${f.col_97 || ''} col_98=${f.col_98 || ''} ` +
+            `col_100=${f.col_100 || ''} col_101=${f.col_101 || ''}`
+          );
+        }
+        services = [];
+        for (const [key, val] of Object.entries(f)) {
+          if (serviceMap?.has(key) && String(val) === '1') {
+            services.push(serviceMap.get(key));
+          }
+        }
+
+        const detailUrl = f.kyo_id
+          ? `https://seven-eleven.areamarker.com/711map/info/${f.kyo_id}?shopid=${f.kyo_id}`
+          : null;
+
+        lines.push(JSON.stringify({
+          store_id: f.kyo_id || null,
+          store_name: f.name || null,
+          address_raw: f.addr_1 || null,
+          postal_code: f.zip_code || null,
+          source_url: sourceUrl,
+          detail_url: detailUrl,
+          scraped_at: scrapedAt,
+          hours_24h: hours24,
+          hours_mon_start: hoursMonStart,
+          hours_mon_end: hoursMonEnd,
+          hours_tue_start: hoursTueStart,
+          hours_tue_end: hoursTueEnd,
+          hours_wed_start: hoursWedStart,
+          hours_wed_end: hoursWedEnd,
+          hours_thu_start: hoursThuStart,
+          hours_thu_end: hoursThuEnd,
+          hours_fri_start: hoursFriStart,
+          hours_fri_end: hoursFriEnd,
+          hours_sat_start: hoursSatStart,
+          hours_sat_end: hoursSatEnd,
+          hours_sun_start: hoursSunStart,
+          hours_sun_end: hoursSunEnd,
+          hours_holiday_start: hoursHolidayStart,
+          hours_holiday_end: hoursHolidayEnd,
+          services,
+          payload_json: h
+        }));
+
+        // no extra sleep when navigating list/detail
+      }
+      fs.writeFileSync(outPath, lines.join('\n') + (lines.length ? '\n' : ''));
+      console.log(`${pref}: ${lines.length} -> ${outPath}`);
+      // no extra sleep after each prefecture
+    }
+  } finally {
+    await browser.close();
   }
-
-  await browser.close();
 }
 
 main().catch((err) => {
