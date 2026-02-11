@@ -74,6 +74,7 @@ function parsePrefArg(options = {}) {
   const allowedSet = new Set(allowedCodes);
 
   const idx = argv.indexOf(flag);
+  // `null` means "no prefecture filter" and callers interpret it as "all prefectures".
   if (idx === -1) return null;
 
   const raw = argv[idx + 1];
@@ -87,6 +88,7 @@ function parsePrefArg(options = {}) {
 
   const normalized = normalizePrefToken(value);
   if (allowAll && normalized === 'all') {
+    // Explicit `--pref all` is normalized to the same sentinel (`null`).
     return null;
   }
   const standardCode = EN_ALIAS_TO_STANDARD_CODE.get(normalized) || null;
