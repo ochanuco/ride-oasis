@@ -4,7 +4,8 @@
   "description": "コンビニ等の公式サイトから店舗情報を収集し、住所正規化と座標付与を行って BigQuery のマートとして提供する補給地点DBです。",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/*.test.js",
+    "test:unit": "node --test tests/*.test.js",
     "playwright": "playwright",
     "pw:test": "playwright test"
   },
