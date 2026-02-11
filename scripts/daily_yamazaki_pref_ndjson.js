@@ -61,7 +61,7 @@ async function postJsonWithRetry(url, body, maxAttempts = 4, baseDelay = 500) {
         body: JSON.stringify(body)
       });
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status()}`);
+        throw new Error(`HTTP ${res.status}`);
       }
       return await res.json();
     } catch (err) {
