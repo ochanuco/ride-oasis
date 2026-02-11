@@ -10,7 +10,7 @@ function jstNowKey() {
   return `${yyyy}${mm}${dd}${hh}`;
 }
 
-test('7-Eleven Kochi API reachable via Playwright CLI', async ({ page }) => {
+test('7-Eleven Kochi (39) API reachable via Playwright CLI', async ({ page }) => {
   let capturedHeaders = null;
   page.on('request', (req) => {
     if (req.url().includes('/v1/search-by-condition')) {
