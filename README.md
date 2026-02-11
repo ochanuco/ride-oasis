@@ -52,20 +52,22 @@
 
 ## 使い方（取得）
 
-都道府県コードで絞って NDJSON を出力します。
+都道府県をローマ字 (`tokyo`, `osaka` など) で指定して NDJSON を出力します。全都道府県を回すときは `--pref all` を使えます。利用可能な指定値は `--pref-list` で確認できます。
 
 ```bash
-node scripts/7eleven_pref_ndjson.js --pref 27
-node scripts/lawson_pref_ndjson.js --pref 27
-node scripts/famima_pref_ndjson.js --pref 27
-node scripts/daily_yamazaki_pref_ndjson.js --pref 27
-node scripts/michi_no_eki_pref_ndjson.js --pref 48
-node scripts/ministop_pref_ndjson.js --pref 27
+node scripts/7eleven_pref_ndjson.js --pref osaka
+node scripts/lawson_pref_ndjson.js --pref tokyo
+node scripts/famima_pref_ndjson.js --pref kanagawa
+node scripts/daily_yamazaki_pref_ndjson.js --pref hokkaido
+node scripts/michi_no_eki_pref_ndjson.js --pref kochi
+node scripts/ministop_pref_ndjson.js --pref osaka
+node scripts/7eleven_pref_ndjson.js --pref all
+node scripts/7eleven_pref_ndjson.js --pref-list
 ```
 
 補足:
 
-- `michi_no_eki` は都道府県コード体系が独自（例: 高知は `48`）
+- `michi_no_eki` は都道府県コード体系が独自ですが、`--pref` は他チェーン同様にローマ字指定で利用できます（内部変換）
 - `ministop` は配信 JSON（`_next/data/.../map.json`）を利用するため高速
 - 取得元データに存在しない場合、`detail_url` は出力しません
 

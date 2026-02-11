@@ -1,6 +1,11 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const {
+  parsePrefArg: resolvePrefArg,
+  hasPrefListArg,
+  printPrefList
+} = require('./pref_resolver');
 
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
@@ -15,15 +20,10 @@ const PREF_CODES = [
 ];
 
 function parsePrefArg() {
-  const idx = process.argv.indexOf('--pref');
-  if (idx === -1) return null;
-  const val = process.argv[idx + 1];
-  if (!val) return null;
-  const norm = String(val).padStart(2, '0');
-  if (!/^(0[1-9]|[1-3][0-9]|4[0-7])$/.test(norm)) {
-    throw new Error(`invalid pref code: ${val}`);
-  }
-  return norm;
+  return resolvePrefArg({
+    allowedCodes: PREF_CODES,
+    allowAll: true
+  });
 }
 
 function sleep(ms) {
@@ -194,6 +194,11 @@ async function fetchStoresFromArticleList(page, listUrl) {
 }
 
 async function main() {
+  if (hasPrefListArg()) {
+    printPrefList({ allowedCodes: PREF_CODES });
+    return;
+  }
+
   const outDir = path.join('data', 'famima', 'ndjson');
   fs.mkdirSync(outDir, { recursive: true });
 

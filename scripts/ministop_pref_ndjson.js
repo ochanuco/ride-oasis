@@ -1,5 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const {
+  parsePrefArg: resolvePrefArg,
+  hasPrefListArg,
+  printPrefList
+} = require('./pref_resolver');
 
 const PREF_CODE_TO_NAME = {
   '01': '北海道',
@@ -55,15 +60,10 @@ const PREF_CODES = Object.keys(PREF_CODE_TO_NAME);
 const SOURCE_URL = 'https://map.ministop.co.jp/';
 
 function parsePrefArg() {
-  const idx = process.argv.indexOf('--pref');
-  if (idx === -1) return null;
-  const val = process.argv[idx + 1];
-  if (!val) return null;
-  const norm = String(val).padStart(2, '0');
-  if (!PREF_CODES.includes(norm)) {
-    throw new Error(`invalid pref code: ${val}`);
-  }
-  return norm;
+  return resolvePrefArg({
+    allowedCodes: PREF_CODES,
+    allowAll: true
+  });
 }
 
 function sleep(ms) {
@@ -209,6 +209,11 @@ async function fetchAllShops() {
 }
 
 async function main() {
+  if (hasPrefListArg()) {
+    printPrefList({ allowedCodes: PREF_CODES });
+    return;
+  }
+
   const outDir = path.join('data', 'ministop', 'ndjson');
   fs.mkdirSync(outDir, { recursive: true });
 
