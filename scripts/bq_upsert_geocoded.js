@@ -196,24 +196,30 @@ function runUpsertFlow(options) {
   ];
   runBq(loadArgs, { dryRun: options.dryRun });
 
-  const sql = buildMergeSql(options.project, safeDataset, safeTable, tempTable);
-  const queryArgs = [
-    ...baseArgs,
-    'query',
-    '--use_legacy_sql=false',
-    sql
-  ];
-  runBq(queryArgs, { dryRun: options.dryRun });
-
-  if (!options.keepTemp) {
-    const rmArgs = [
+  try {
+    const sql = buildMergeSql(options.project, safeDataset, safeTable, tempTable);
+    const queryArgs = [
       ...baseArgs,
-      'rm',
-      '-f',
-      '-t',
-      tempTableFq
+      'query',
+      '--use_legacy_sql=false',
+      sql
     ];
-    runBq(rmArgs, { dryRun: options.dryRun });
+    runBq(queryArgs, { dryRun: options.dryRun });
+  } finally {
+    if (!options.keepTemp) {
+      const rmArgs = [
+        ...baseArgs,
+        'rm',
+        '-f',
+        '-t',
+        tempTableFq
+      ];
+      try {
+        runBq(rmArgs, { dryRun: options.dryRun });
+      } catch (cleanupErr) {
+        console.error(`warning: failed to drop temp table: ${cleanupErr?.message || cleanupErr}`);
+      }
+    }
   }
 }
 
