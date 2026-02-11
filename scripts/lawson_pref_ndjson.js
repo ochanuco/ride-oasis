@@ -57,7 +57,7 @@ async function extractAreaUrlsFromPage(page) {
       if (!href) continue;
       const abs = href.startsWith('http') ? href : `${sourceUrl}${href.replace(/^\//, '')}`;
       const normalized = abs
-        .replace(/([?&])page=\\d+&?/g, '$1')
+        .replace(/([?&])page=\d+&?/g, '$1')
         .replace(/[?&]$/, '');
       out.add(normalized);
     }
@@ -130,15 +130,15 @@ async function fetchStoresByArea(page, areaUrl) {
   all.push(...(await extractStoresFromCurrentPage(page, areaUrl)));
 
   const maxPage = await extractMaxPageFromCurrentPage(page);
-  for (let pageNo = 1; pageNo <= maxPage; pageNo += 1) {
+  for (let pageNo = 2; pageNo <= maxPage; pageNo += 1) {
     const base = areaUrl
-      .replace(/([?&])page=\\d+&?/g, '$1')
+      .replace(/([?&])page=\d+&?/g, '$1')
       .replace(/[?&]$/, '');
     const sep = base.includes('?') ? '&' : '?';
     const pageUrl = `${base}${sep}page=${pageNo}`;
     const okPage = await gotoWithRetry(page, pageUrl);
     if (!okPage) continue;
-    all.push(...(await extractStoresFromCurrentPage(page, areaUrl)));
+    all.push(...(await extractStoresFromCurrentPage(page, pageUrl)));
   }
 
   return all;
