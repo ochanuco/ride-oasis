@@ -46,11 +46,13 @@ async function captureHeaders(page) {
     }
   });
 
-  await page.goto('https://seven-eleven.areamarker.com/711map/top', { waitUntil: 'networkidle' });
-  await page.waitForTimeout(2000);
-  await page.locator('input#input').fill('大阪東野田町４丁目');
-  await page.locator('input#input').press('Enter');
-  await page.waitForTimeout(3000);
+  const requestPromise = page.waitForRequest((req) =>
+    req.url().includes('/v1/search-by-condition')
+  );
+  await page.goto('https://seven-eleven.areamarker.com/711map/arealist/39/212?shopid=373221', {
+    waitUntil: 'networkidle'
+  });
+  await requestPromise;
 
   if (!captured) {
     throw new Error('failed to capture headers');
