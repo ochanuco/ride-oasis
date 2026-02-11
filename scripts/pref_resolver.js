@@ -82,9 +82,13 @@ function parsePrefArg(options = {}) {
   if (idx === -1) return null;
 
   const raw = argv[idx + 1];
-  if (!raw) return null;
+  if (!raw || String(raw).startsWith('-')) {
+    throw new Error(`${flag} requires a value (e.g. tokyo, all)`);
+  }
   const value = String(raw).trim();
-  if (!value) return null;
+  if (!value) {
+    throw new Error(`${flag} requires a non-empty value (e.g. tokyo, all)`);
+  }
 
   const normalized = normalizePrefToken(value);
   if (allowAll && normalized === 'all') {
