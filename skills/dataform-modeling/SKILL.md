@@ -20,9 +20,17 @@
 - `supply_point_id = CONCAT(chain, ':', store_id)` を一意キーにする
 - `updated_at` は Dataform の生成日時または upstream の最新日時
 - `point_level` の閾値は運用開始後に可変とする
+- Dataform 内で外部 I/O や npm 実行は行わない（住所正規化は Cloud Run 側）
 
 ## テーブル要件
 
 - `stg` は最新化・整形に限定（重いロジックは避ける）
 - `mart` は 1 行 1 供給点を厳守
 - `ops` は可視化しやすい粒度で作成
+
+## スキーマ運用の注意
+
+- `raw.stores_scraped_*` はチェーンごとの差異を許容する
+- `raw.stores_geocoded` は共通スキーマを維持する
+- 欠損があり得る列（例: `postal_code`, `hours_text`）は NULL 許容で扱う
+- 生成列の命名はチェーン依存語を避け、横断的に理解できる名前を優先する

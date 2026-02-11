@@ -4,9 +4,18 @@
 
 ## 目的
 
-- セブン‐イレブン / ローソン / ファミリーマートの店舗情報を収集
+- コア対象: セブン‐イレブン / ローソン / ファミリーマートの店舗情報を収集
 - 住所を正規化し、緯度経度を付与
 - BigQuery 上で最新化・重複排除し `mart.rideoasis_supply_points` を提供
+
+## 実装済みクローラ
+
+- 7-Eleven
+- Lawson
+- FamilyMart
+- Daily Yamazaki
+- 道の駅
+- MINISTOP
 
 ## アーキテクチャ
 
@@ -53,6 +62,12 @@ node scripts/daily_yamazaki_pref_ndjson.js --pref 27
 node scripts/michi_no_eki_pref_ndjson.js --pref 48
 node scripts/ministop_pref_ndjson.js --pref 27
 ```
+
+補足:
+
+- `michi_no_eki` は都道府県コード体系が独自（例: 高知は `48`）
+- `ministop` は配信 JSON（`_next/data/.../map.json`）を利用するため高速
+- 取得元データに存在しない場合、`detail_url` は出力しません
 
 ## 注意事項
 
