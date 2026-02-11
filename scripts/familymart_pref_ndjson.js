@@ -199,7 +199,7 @@ async function main() {
     return;
   }
 
-  const outDir = path.join('data', 'famima', 'ndjson');
+  const outDir = path.join('data', 'familymart', 'ndjson');
   fs.mkdirSync(outDir, { recursive: true });
 
   const browser = await chromium.launch({ headless: true });
@@ -261,7 +261,7 @@ async function main() {
         }
       }
 
-      const outPath = path.join(outDir, `stores_famima_pref_${pref}.ndjson`);
+      const outPath = path.join(outDir, `stores_familymart_pref_${pref}.ndjson`);
       if (lines.length > 0) {
         fs.writeFileSync(outPath, `${lines.join('\n')}\n`);
         console.log(`${pref}: ${lines.length} -> ${outPath}`);
