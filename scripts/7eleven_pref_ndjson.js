@@ -1,6 +1,11 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const {
+  parsePrefArg: resolvePrefArg,
+  hasPrefListArg,
+  printPrefList
+} = require('./pref_resolver');
 
 const PREF_CODES = [
   '01','02','03','04','05','06','07',
@@ -13,15 +18,12 @@ const PREF_CODES = [
 ];
 
 function parsePrefArg() {
-  const idx = process.argv.indexOf('--pref');
-  if (idx === -1) return null;
-  const val = process.argv[idx + 1];
-  if (!val) return null;
-  const norm = String(val).padStart(2, '0');
-  if (!/^(0[1-9]|[1-3][0-9]|4[0-7])$/.test(norm)) {
-    throw new Error(`invalid pref code: ${val}`);
-  }
-  return norm;
+  return resolvePrefArg({
+    allowedCodes: PREF_CODES,
+    allowJapanese: false,
+    allowNumeric: false,
+    allowAll: true
+  });
 }
 
 function jstNowKey() {
@@ -123,6 +125,11 @@ async function fetchPref(page, headers, prefCode, fields) {
 }
 
 async function main() {
+  if (hasPrefListArg()) {
+    printPrefList({ allowedCodes: PREF_CODES });
+    return;
+  }
+
   const outDir = path.join('data', '7eleven', 'ndjson');
   fs.mkdirSync(outDir, { recursive: true });
 

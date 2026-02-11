@@ -1,5 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const {
+  parsePrefArg: resolvePrefArg,
+  hasPrefListArg,
+  printPrefList
+} = require('./pref_resolver');
 
 const PREF_CODES = [
   '10', '11', '12', '13', '14', '15', '16',
@@ -20,15 +25,13 @@ const DEFAULT_HEADERS = {
 };
 
 function parsePrefArg() {
-  const idx = process.argv.indexOf('--pref');
-  if (idx === -1) return null;
-  const val = process.argv[idx + 1];
-  if (!val) return null;
-  const norm = String(val).padStart(2, '0');
-  if (!PREF_CODES.includes(norm)) {
-    throw new Error(`invalid pref code: ${val}`);
-  }
-  return norm;
+  return resolvePrefArg({
+    allowedCodes: PREF_CODES,
+    fromStandardCode: (code) => String(Number(code) + 9).padStart(2, '0'),
+    allowJapanese: false,
+    allowNumeric: false,
+    allowAll: true
+  });
 }
 
 function sleep(ms) {
@@ -205,6 +208,14 @@ async function fetchStoreRecord(detailUrl, prefCode, scrapedAt) {
 }
 
 async function main() {
+  if (hasPrefListArg()) {
+    printPrefList({
+      allowedCodes: PREF_CODES,
+      toStandardCode: (code) => String(Number(code) - 9).padStart(2, '0')
+    });
+    return;
+  }
+
   const outDir = path.join('data', 'michi_no_eki', 'ndjson');
   fs.mkdirSync(outDir, { recursive: true });
 
