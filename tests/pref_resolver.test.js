@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parsePrefArg } = require('../scripts/pref_resolver');
 
-test('returns null when --pref is not provided', () => {
+test('--pref 未指定なら null を返す', () => {
   const result = parsePrefArg({
     argv: ['node', 'script.js'],
     allowedCodes: ['13']
@@ -10,7 +10,7 @@ test('returns null when --pref is not provided', () => {
   assert.equal(result, null);
 });
 
-test('returns null when --pref all is provided', () => {
+test('--pref all 指定なら null を返す', () => {
   const result = parsePrefArg({
     argv: ['node', 'script.js', '--pref', 'all'],
     allowedCodes: ['13']
@@ -18,7 +18,7 @@ test('returns null when --pref all is provided', () => {
   assert.equal(result, null);
 });
 
-test('resolves english prefecture name', () => {
+test('英語県名を標準コードに解決する', () => {
   const result = parsePrefArg({
     argv: ['node', 'script.js', '--pref', 'tokyo'],
     allowedCodes: ['13']
@@ -26,14 +26,14 @@ test('resolves english prefecture name', () => {
   assert.equal(result, '13');
 });
 
-test('throws when --pref value is missing', () => {
+test('--pref の値が欠けている場合は例外を投げる', () => {
   assert.throws(
     () => parsePrefArg({ argv: ['node', 'script.js', '--pref'], allowedCodes: ['13'] }),
     /--pref requires a value/
   );
 });
 
-test('throws when next token after --pref is another flag', () => {
+test('--pref の次が別フラグなら例外を投げる', () => {
   assert.throws(
     () => parsePrefArg({ argv: ['node', 'script.js', '--pref', '--pref-list'], allowedCodes: ['13'] }),
     /--pref requires a value/
