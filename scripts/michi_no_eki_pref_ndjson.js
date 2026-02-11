@@ -13,6 +13,7 @@ const PREF_CODES = [
 
 const SOURCE_URL = 'https://www.michi-no-eki.jp/search';
 const SEARCH_BASE_URL = 'https://www.michi-no-eki.jp/stations/search';
+const FETCH_TIMEOUT_MS = 30000;
 const DEFAULT_HEADERS = {
   'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
   'accept-language': 'ja-JP,ja;q=0.9'
@@ -70,16 +71,21 @@ async function fetchTextWithRetry(url, maxAttempts = 4, baseDelay = 500) {
   let lastErr = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const res = await fetch(url, { headers: DEFAULT_HEADERS });
+      const res = await fetch(url, {
+        headers: DEFAULT_HEADERS,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+      });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
       return await res.text();
     } catch (err) {
       lastErr = err;
-      const delay = baseDelay * Math.pow(2, attempt - 1);
       console.warn(`fetch failed (attempt ${attempt}/${maxAttempts}) url=${url} err=${err.message}`);
-      await sleep(delay);
+      if (attempt < maxAttempts) {
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        await sleep(delay);
+      }
     }
   }
   throw new Error(`fetch failed after retries url=${url} err=${lastErr?.message || 'unknown'}`);
