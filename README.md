@@ -65,11 +65,48 @@ node scripts/7eleven_pref_ndjson.js --pref all
 node scripts/7eleven_pref_ndjson.js --pref-list
 ```
 
+取得済み NDJSON から `raw.stores_geocoded` 共通スキーマの NDJSON を作る:
+
+```bash
+npm run geocode:ndjson -- \
+  --chain lawson \
+  --input data/lawson/ndjson \
+  --existing data/geocoded \
+  --output data/geocoded/stores_geocoded_lawson.ndjson \
+  --engine-version 3.1.3
+```
+
+ローカルで 1 件だけ座標付与を確認する:
+
+```bash
+mkdir -p /tmp/ride-oasis-check
+head -n 1 data/lawson/ndjson/stores_lawson_pref_13.ndjson > /tmp/ride-oasis-check/one_store.ndjson
+
+npm run geocode:ndjson -- \
+  --chain lawson \
+  --input /tmp/ride-oasis-check/one_store.ndjson \
+  --output /tmp/ride-oasis-check/one_store_geocoded.ndjson \
+  --engine-version 3.1.3
+
+cat /tmp/ride-oasis-check/one_store_geocoded.ndjson
+```
+
+`raw.stores_geocoded` へ Upsert（`bq load` + `MERGE`）する:
+
+```bash
+npm run bq:upsert:geocoded -- \
+  --project your-gcp-project \
+  --dataset raw \
+  --table stores_geocoded \
+  --source data/geocoded/stores_geocoded_lawson.ndjson
+```
+
 補足:
 
 - `michi_no_eki` は都道府県コード体系が独自ですが、`--pref` は他チェーン同様にローマ字指定で利用できます（内部変換）
 - `ministop` は配信 JSON（`_next/data/.../map.json`）を利用するため高速
 - 取得元データに存在しない場合、`detail_url` は出力しません
+- `bq:upsert:geocoded` は `schemas/raw/stores_geocoded.json` を使って一時テーブルへロードし、`chain + store_id` 単位で最新 `geocoded_at` を残す Upsert を行います
 
 ## 注意事項
 

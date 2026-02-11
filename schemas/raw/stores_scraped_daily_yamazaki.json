@@ -1,0 +1,21 @@
+[
+  {"name":"store_id","type":"STRING","mode":"REQUIRED"},
+  {"name":"store_name","type":"STRING","mode":"NULLABLE"},
+  {"name":"address_raw","type":"STRING","mode":"NULLABLE"},
+  {"name":"postal_code","type":"STRING","mode":"NULLABLE"},
+  {"name":"phone_number","type":"STRING","mode":"NULLABLE"},
+  {"name":"source_url","type":"STRING","mode":"NULLABLE"},
+  {"name":"scraped_at","type":"TIMESTAMP","mode":"REQUIRED"},
+  {"name":"hours_text","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_mon","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_tue","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_wed","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_thu","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_fri","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_sat","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_sun","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_notice","type":"STRING","mode":"NULLABLE"},
+  {"name":"hours_note","type":"STRING","mode":"NULLABLE"},
+  {"name":"business_day_note","type":"STRING","mode":"NULLABLE"},
+  {"name":"payload_json","type":"JSON","mode":"NULLABLE"}
+]
