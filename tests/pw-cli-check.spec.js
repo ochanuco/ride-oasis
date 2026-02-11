@@ -21,7 +21,7 @@ test('7-Eleven Kochi API reachable via Playwright CLI', async ({ page }) => {
   const requestPromise = page.waitForRequest((req) =>
     req.url().includes('/v1/search-by-condition')
   );
-  await page.goto('https://seven-eleven.areamarker.com/711map/arealist/39/212?shopid=373221', {
+  await page.goto('https://seven-eleven.areamarker.com/711map/arealist/39', {
     waitUntil: 'networkidle'
   });
   await requestPromise;
