@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const {
   parseArgs,
   pickLatestByStoreId,
-  buildGeocodedRows
+  buildGeocodedRows,
+  geocodeFieldsFromResult
 } = require('../scripts/geocode_stores_ndjson');
 
 test('CLI引数を正常に解釈できる', () => {
@@ -114,4 +115,13 @@ test('address_raw がない場合は geocode_error を残す', async () => {
   assert.equal(rows[0].geocode_error, 'address_raw is missing');
   assert.equal(rows[0].point_lat, null);
   assert.equal(rows[0].point_lng, null);
+});
+
+test('point_level は point 系フィールドのみから算出し level を流用しない', () => {
+  const fields = geocodeFieldsFromResult({
+    level: 8,
+    point: {}
+  });
+  assert.equal(fields.level, 8);
+  assert.equal(fields.point_level, null);
 });

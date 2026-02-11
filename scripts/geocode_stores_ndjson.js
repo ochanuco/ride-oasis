@@ -222,7 +222,7 @@ function geocodeFieldsFromResult(result) {
     point_lat: pointLat,
     point_lng: pointLng,
     level: asInt(result?.level),
-    point_level: asInt(result?.point?.level ?? result?.pointLevel ?? result?.level),
+    point_level: asInt(result?.point?.level ?? result?.pointLevel),
     pref: typeof result?.pref === 'string' ? result.pref : null,
     city: typeof result?.city === 'string' ? result.city : null,
     town: typeof result?.town === 'string' ? result.town : null,
