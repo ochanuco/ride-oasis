@@ -51,6 +51,7 @@ node scripts/lawson_pref_ndjson.js --pref 27
 node scripts/famima_pref_ndjson.js --pref 27
 node scripts/daily_yamazaki_pref_ndjson.js --pref 27
 node scripts/michi_no_eki_pref_ndjson.js --pref 48
+node scripts/ministop_pref_ndjson.js --pref 27
 ```
 
 ## 注意事項
