@@ -1,0 +1,19 @@
+[
+  {"name":"chain","type":"STRING","mode":"REQUIRED"},
+  {"name":"store_id","type":"STRING","mode":"REQUIRED"},
+  {"name":"address_raw","type":"STRING","mode":"NULLABLE"},
+  {"name":"address_norm","type":"STRING","mode":"NULLABLE"},
+  {"name":"point_lat","type":"FLOAT64","mode":"NULLABLE"},
+  {"name":"point_lng","type":"FLOAT64","mode":"NULLABLE"},
+  {"name":"level","type":"INT64","mode":"NULLABLE"},
+  {"name":"point_level","type":"INT64","mode":"NULLABLE"},
+  {"name":"geocode_engine","type":"STRING","mode":"REQUIRED"},
+  {"name":"engine_version","type":"STRING","mode":"NULLABLE"},
+  {"name":"geocoded_at","type":"TIMESTAMP","mode":"REQUIRED"},
+  {"name":"geocode_error","type":"STRING","mode":"NULLABLE"},
+  {"name":"pref","type":"STRING","mode":"NULLABLE"},
+  {"name":"city","type":"STRING","mode":"NULLABLE"},
+  {"name":"town","type":"STRING","mode":"NULLABLE"},
+  {"name":"addr","type":"STRING","mode":"NULLABLE"},
+  {"name":"other","type":"STRING","mode":"NULLABLE"}
+]
