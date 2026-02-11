@@ -165,12 +165,12 @@ async function collectDetailUrlsByPref(prefCode) {
   const urls = new Set(extractDetailUrlsFromSearchPage(firstHtml));
   console.log(`pref ${prefCode}: search pages ${maxPageIndex + 1}`);
 
-  for (let pageNo = 1; pageNo <= maxPageIndex; pageNo += 1) {
+  for (let pageNo = 2; pageNo <= maxPageIndex + 1; pageNo += 1) {
     const pageUrl = `${base}?page=${pageNo}`;
     const html = await fetchTextWithRetry(pageUrl);
     const pageUrls = extractDetailUrlsFromSearchPage(html);
     for (const u of pageUrls) urls.add(u);
-    console.log(`pref ${prefCode}: page ${pageNo + 1}/${maxPageIndex + 1} links=${pageUrls.length}`);
+    console.log(`pref ${prefCode}: page ${pageNo}/${maxPageIndex + 1} links=${pageUrls.length}`);
     await sleep(120);
   }
 
