@@ -33,6 +33,13 @@
 - Dataform: store_id 単位の最新化、`supply_point_id` の一意性
 - ops: 未解決件数や成功率の集計が維持されているか
 
+## ユニットテスト運用
+
+- ユニットテストは Node.js 標準の `node:test` を使い、`tests/*.test.js` に配置する
+- `npm test` と `npm run test:unit` は同じく `node --test tests/*.test.js` を実行する
+- CLI 引数パースなどの安全性に関わる変更では、正常系と異常系（値欠落・不正値）の両方をテストで担保する
+- テスト名は日本語で記述し、仕様意図が読める名前にする
+
 ## このリポジトリの Skills
 
 - `skills/crawler-playwright/SKILL.md`
