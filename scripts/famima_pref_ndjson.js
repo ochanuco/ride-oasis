@@ -61,6 +61,22 @@ function extractBid(detailUrl) {
   }
 }
 
+async function fetchHoursText(page, detailUrl) {
+  if (!detailUrl) return null;
+  const ok = await gotoWithRetry(page, detailUrl, { waitUntil: 'networkidle', timeout: 60000 });
+  if (!ok) return null;
+
+  const hours = await page.evaluate(() => {
+    const th = Array.from(document.querySelectorAll('th'))
+      .find((el) => (el.textContent || '').trim().includes('営業時間'));
+    if (!th) return null;
+    const td = th.nextElementSibling;
+    const text = td ? (td.textContent || '').replace(/\u00a0/g, ' ').trim() : null;
+    return text || null;
+  });
+  return hours;
+}
+
 async function fetchArticleListUrls(page, prefCode) {
   const url = `https://as.chizumaru.com/famima/articleAddressList?account=famima&accmd=0&ftop=1&adr=${prefCode}&c2=1%2C2`;
   const ok = await gotoWithRetry(page, url, { waitUntil: 'networkidle', timeout: 60000 });
@@ -108,12 +124,17 @@ async function fetchStoresFromArticleList(page, listUrl) {
         store_id: bid,
         store_name: row.name || null,
         address_raw: row.address || null,
-        detail_url: detailUrl
+        detail_url: detailUrl,
+        hours_text: null
       });
     }
   }
 
-  return Array.from(byBid.values());
+  const stores = Array.from(byBid.values());
+  for (const store of stores) {
+    store.hours_text = await fetchHoursText(page, store.detail_url);
+  }
+  return stores;
 }
 
 async function main() {
@@ -156,13 +177,14 @@ async function main() {
             store_id: s.store_id || null,
             store_name: s.store_name || null,
             address_raw: s.address_raw || null,
-            postal_code: null,
             source_url: sourceUrl,
             detail_url: s.detail_url || null,
             scraped_at: scrapedAt,
+            hours_text: s.hours_text || null,
             payload_json: {
               list_url: listUrl,
-              detail_url: s.detail_url || null
+              detail_url: s.detail_url || null,
+              hours_text: s.hours_text || null
             }
           }));
         }
