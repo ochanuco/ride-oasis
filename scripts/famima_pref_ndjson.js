@@ -2,6 +2,8 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
+
 const PREF_CODES = [
   '01','02','03','04','05','06','07',
   '08','09','10','11','12','13','14',
@@ -197,7 +199,7 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({
-    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    userAgent: DEFAULT_USER_AGENT,
     locale: 'ja-JP'
   });
   await page.setExtraHTTPHeaders({
@@ -255,8 +257,12 @@ async function main() {
       }
 
       const outPath = path.join(outDir, `stores_famima_pref_${pref}.ndjson`);
-      fs.writeFileSync(outPath, lines.join('\n') + (lines.length ? '\n' : ''));
-      console.log(`${pref}: ${lines.length} -> ${outPath}`);
+      if (lines.length > 0) {
+        fs.writeFileSync(outPath, `${lines.join('\n')}\n`);
+        console.log(`${pref}: ${lines.length} -> ${outPath}`);
+      } else {
+        console.log(`${pref}: 0 stores found, skipping file creation`);
+      }
     }
   } finally {
     await browser.close();
