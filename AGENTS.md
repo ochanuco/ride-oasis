@@ -7,7 +7,8 @@
 - 目的は「補給地点DB」を BigQuery マートとして提供すること
 - 公式サイトの変更に追従しやすいよう、クロールは Codex + Playwright 前提
 - 住所正規化/座標付与は Cloud Run 側で実行し、Dataform は BQ 内完結
-- 対象チェーンは 7-Eleven / Lawson / FamilyMart（拡張可能な設計）
+- `plan.md` 上のコア対象チェーンは 7-Eleven / Lawson / FamilyMart（拡張可能な設計）
+- 現在の実装済みクローラは 7-Eleven / Lawson / FamilyMart / Daily Yamazaki / 道の駅 / MINISTOP
 
 ## コンポーネント責務
 
@@ -22,6 +23,9 @@
 - `raw.stores_geocoded` は単一テーブルで共通スキーマを維持する
 - 住所正規化は 1 住所 1 回を原則とし、再計算を避ける
 - Dataform 側で外部 I/O や npm 実行を行わない
+- 取得元に詳細URLが存在しない場合は `detail_url` を無理に生成しない
+- API/JSONが使えるサイトでは、DOM抽出より API/JSON 取得を優先する
+- リトライ処理にはタイムアウトを設定し、最終試行後の不要な待機を避ける
 
 ## 変更時のチェック
 
