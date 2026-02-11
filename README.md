@@ -47,6 +47,9 @@
 
 ```bash
 node scripts/7eleven_pref_ndjson.js --pref 27
+node scripts/lawson_pref_ndjson.js --pref 27
+node scripts/famima_pref_ndjson.js --pref 27
+node scripts/daily_yamazaki_pref_ndjson.js --pref 27
 ```
 
 ## 注意事項
