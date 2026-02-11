@@ -23,8 +23,6 @@ const DEFAULT_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (
 function parsePrefArg() {
   return resolvePrefArg({
     allowedCodes: PREF_CODES,
-    allowJapanese: false,
-    allowNumeric: false,
     allowAll: true
   });
 }

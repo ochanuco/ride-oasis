@@ -62,8 +62,6 @@ const SOURCE_URL = 'https://map.ministop.co.jp/';
 function parsePrefArg() {
   return resolvePrefArg({
     allowedCodes: PREF_CODES,
-    allowJapanese: false,
-    allowNumeric: false,
     allowAll: true
   });
 }

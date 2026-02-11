@@ -28,8 +28,6 @@ function parsePrefArg() {
   return resolvePrefArg({
     allowedCodes: PREF_CODES,
     fromStandardCode: (code) => String(Number(code) + 9).padStart(2, '0'),
-    allowJapanese: false,
-    allowNumeric: false,
     allowAll: true
   });
 }

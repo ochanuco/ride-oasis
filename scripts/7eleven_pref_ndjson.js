@@ -20,8 +20,6 @@ const PREF_CODES = [
 function parsePrefArg() {
   return resolvePrefArg({
     allowedCodes: PREF_CODES,
-    allowJapanese: false,
-    allowNumeric: false,
     allowAll: true
   });
 }

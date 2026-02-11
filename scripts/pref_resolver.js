@@ -61,10 +61,7 @@ function addAlias(map, alias, code) {
 }
 
 const EN_ALIAS_TO_STANDARD_CODE = new Map();
-const NUM_ALIAS_TO_STANDARD_CODE = new Map();
 for (const pref of PREFECTURES) {
-  addAlias(NUM_ALIAS_TO_STANDARD_CODE, pref.code, pref.code);
-  addAlias(NUM_ALIAS_TO_STANDARD_CODE, String(Number(pref.code)), pref.code);
   addAlias(EN_ALIAS_TO_STANDARD_CODE, pref.en, pref.code);
 }
 
@@ -73,8 +70,6 @@ function parsePrefArg(options = {}) {
   const flag = options.flag || '--pref';
   const allowedCodes = options.allowedCodes || [];
   const fromStandardCode = options.fromStandardCode || ((code) => code);
-  const allowEnglish = options.allowEnglish !== false;
-  const allowNumeric = options.allowNumeric !== false;
   const allowAll = options.allowAll !== false;
   const allowedSet = new Set(allowedCodes);
 
@@ -94,14 +89,7 @@ function parsePrefArg(options = {}) {
   if (allowAll && normalized === 'all') {
     return null;
   }
-  let standardCode = null;
-
-  if (allowNumeric) {
-    standardCode = NUM_ALIAS_TO_STANDARD_CODE.get(normalized) || null;
-  }
-  if (!standardCode && allowEnglish) {
-    standardCode = EN_ALIAS_TO_STANDARD_CODE.get(normalized) || null;
-  }
+  const standardCode = EN_ALIAS_TO_STANDARD_CODE.get(normalized) || null;
   if (standardCode) {
     const mappedCode = fromStandardCode(standardCode);
     if (allowedSet.has(mappedCode)) return mappedCode;
