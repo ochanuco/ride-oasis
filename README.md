@@ -57,7 +57,7 @@
 ```bash
 node scripts/7eleven_pref_ndjson.js --pref osaka
 node scripts/lawson_pref_ndjson.js --pref tokyo
-node scripts/famima_pref_ndjson.js --pref kanagawa
+node scripts/familymart_pref_ndjson.js --pref kanagawa
 node scripts/daily_yamazaki_pref_ndjson.js --pref hokkaido
 node scripts/michi_no_eki_pref_ndjson.js --pref kochi
 node scripts/ministop_pref_ndjson.js --pref osaka
