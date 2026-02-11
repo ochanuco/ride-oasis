@@ -38,7 +38,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function captureHeaders(page) {
+async function captureHeaders(page, prefCode) {
   let captured = null;
   page.on('request', (req) => {
     if (req.url().includes('/v1/search-by-condition')) {
@@ -46,11 +46,13 @@ async function captureHeaders(page) {
     }
   });
 
-  await page.goto('https://seven-eleven.areamarker.com/711map/top', { waitUntil: 'networkidle' });
-  await page.waitForTimeout(2000);
-  await page.locator('input#input').fill('大阪東野田町４丁目');
-  await page.locator('input#input').press('Enter');
-  await page.waitForTimeout(3000);
+  const requestPromise = page.waitForRequest((req) =>
+    req.url().includes('/v1/search-by-condition')
+  );
+  await page.goto(`https://seven-eleven.areamarker.com/711map/arealist/${prefCode}`, {
+    waitUntil: 'networkidle'
+  });
+  await requestPromise;
 
   if (!captured) {
     throw new Error('failed to capture headers');
@@ -137,7 +139,10 @@ async function main() {
   });
 
   try {
-    const headers = await captureHeaders(page);
+    const onlyPref = parsePrefArg();
+    const targets = onlyPref ? [onlyPref] : PREF_CODES;
+    const headerPref = targets[0] || '01';
+    const headers = await captureHeaders(page, headerPref);
     const scrapedAt = new Date().toISOString();
     const sourceUrl = 'https://seven-eleven.areamarker.com/711map/top';
     const svcRes = await page.request.get('https://seven-eleven.areamarker.com/711map/data/serviceCol.json');
@@ -165,9 +170,6 @@ async function main() {
     ];
     const serviceFields = svc.map((s) => s.id);
     const fields = Array.from(new Set([...baseFields, ...detailFields, ...serviceFields]));
-
-    const onlyPref = parsePrefArg();
-    const targets = onlyPref ? [onlyPref] : PREF_CODES;
 
     for (const pref of targets) {
       if (aborted) break;

@@ -10,7 +10,7 @@ function jstNowKey() {
   return `${yyyy}${mm}${dd}${hh}`;
 }
 
-test('7-Eleven Kochi API reachable via Playwright CLI', async ({ page }) => {
+test('7-Eleven Kochi (39) API reachable via Playwright CLI', async ({ page }) => {
   let capturedHeaders = null;
   page.on('request', (req) => {
     if (req.url().includes('/v1/search-by-condition')) {
@@ -18,11 +18,13 @@ test('7-Eleven Kochi API reachable via Playwright CLI', async ({ page }) => {
     }
   });
 
-  await page.goto('https://seven-eleven.areamarker.com/711map/top', { waitUntil: 'networkidle' });
-  await page.waitForTimeout(2000);
-  await page.locator('input#input').fill('大阪東野田町４丁目');
-  await page.locator('input#input').press('Enter');
-  await page.waitForTimeout(3000);
+  const requestPromise = page.waitForRequest((req) =>
+    req.url().includes('/v1/search-by-condition')
+  );
+  await page.goto('https://seven-eleven.areamarker.com/711map/arealist/39', {
+    waitUntil: 'networkidle'
+  });
+  await requestPromise;
 
   expect(capturedHeaders).toBeTruthy();
 
