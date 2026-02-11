@@ -28,4 +28,14 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
-        run: npm run test:unit
+        run: |
+          mkdir -p test-results
+          node --test --test-reporter=junit --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml tests/*.test.js
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-node-${{ matrix.node-version }}
+          path: test-results/junit-node-${{ matrix.node-version }}.xml
+          if-no-files-found: error

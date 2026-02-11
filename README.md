@@ -1,4 +1,5 @@
 # RideOasis
+[![Unit Tests](https://github.com/ochanuco/ride-oasis/actions/workflows/unit-tests.yml/badge.svg?branch=main)](https://github.com/ochanuco/ride-oasis/actions/workflows/unit-tests.yml)
 
 コンビニ等の公式サイトから店舗情報を収集し、住所正規化と座標付与を行って BigQuery のマートとして提供する補給地点DBです。
 
