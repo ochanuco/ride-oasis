@@ -28,11 +28,12 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function gotoWithRetry(page, url, options, maxAttempts = 4, baseDelay = 500) {
+async function gotoWithRetry(page, url, options = {}, maxAttempts = 4, baseDelay = 500) {
   let lastErr = null;
+  const merged = { waitUntil: 'domcontentloaded', timeout: 45000, ...options };
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      await page.goto(url, options);
+      await page.goto(url, merged);
       return true;
     } catch (err) {
       lastErr = err;
@@ -145,6 +146,16 @@ async function main() {
   const page = await browser.newPage({
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     locale: 'ja-JP'
+  });
+  await page.setExtraHTTPHeaders({
+    referer: 'https://as.chizumaru.com/famima/top?account=famima&accmd=0'
+  });
+  await page.route('**/*', (route) => {
+    const url = route.request().url();
+    if (url.includes('google-analytics.com') || url.includes('googletagmanager.com')) {
+      return route.abort();
+    }
+    return route.continue();
   });
 
   let aborted = false;
