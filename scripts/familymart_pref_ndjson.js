@@ -58,50 +58,6 @@ async function gotoWithRetry(page, url, options = {}, maxAttempts = 4, baseDelay
   return false;
 }
 
-async function fetchTextWithRetry(request, url, options = {}, maxAttempts = 4, baseDelay = 300) {
-  let lastErr = null;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const res = await request.get(url, options);
-      if (!res.ok()) {
-        const status = res.status();
-        if (status === 429 || status >= 500) {
-          throw new Error(`HTTP ${status}`);
-        }
-        return null;
-      }
-      return await res.text();
-    } catch (err) {
-      lastErr = err;
-      const delay = baseDelay * Math.pow(2, attempt - 1);
-      console.warn(`request failed (attempt ${attempt}/${maxAttempts}) url=${url} err=${err.message}`);
-      await sleep(delay);
-    }
-  }
-  console.error(`request failed after retries url=${url} err=${lastErr?.message || 'unknown'}`);
-  return null;
-}
-
-async function mapWithConcurrency(items, limit, mapper) {
-  const result = new Array(items.length);
-  let index = 0;
-
-  async function worker() {
-    while (true) {
-      const current = index;
-      index += 1;
-      if (current >= items.length) break;
-      result[current] = await mapper(items[current], current);
-    }
-  }
-
-  const workers = [];
-  const count = Math.max(1, Math.min(limit, items.length));
-  for (let i = 0; i < count; i += 1) workers.push(worker());
-  await Promise.all(workers);
-  return result;
-}
-
 function normalizeDetailUrl(href) {
   if (!href) return null;
   if (href.startsWith('http')) return href;
@@ -116,20 +72,6 @@ function extractBid(detailUrl) {
   } catch {
     return null;
   }
-}
-
-async function fetchHoursText(page, detailUrl) {
-  if (!detailUrl) return null;
-  const html = await fetchTextWithRetry(page.request, detailUrl, {
-    headers: {
-      referer: 'https://as.chizumaru.com/famima/top?account=famima&accmd=0'
-    },
-    timeout: 30000
-  });
-  if (!html) return null;
-
-  const m = html.match(/<th[^>]*>\s*営業時間\s*<\/th>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/i);
-  return stripHtml(m ? m[1] : null);
 }
 
 async function fetchArticleListUrls(page, prefCode) {
@@ -160,12 +102,19 @@ async function fetchStoresFromArticleList(page, listUrl) {
       if (table) {
         const ths = Array.from(table.querySelectorAll('th'));
         const addrTh = ths.find((th) => (th.textContent || '').trim() === '住所');
+        const hoursTh = ths.find((th) => (th.textContent || '').trim() === '営業時間');
         if (addrTh) {
           const td = addrTh.nextElementSibling;
           address = td ? (td.textContent || '').replace(/\u00a0/g, ' ').trim() : null;
         }
+        let hours = null;
+        if (hoursTh) {
+          const td = hoursTh.nextElementSibling;
+          hours = td ? (td.textContent || '').replace(/\u00a0/g, ' ').trim() : null;
+        }
+        return { name, href, address, hours };
       }
-      return { name, href, address };
+      return { name, href, address, hours: null };
     });
   });
 
@@ -180,17 +129,12 @@ async function fetchStoresFromArticleList(page, listUrl) {
         store_name: row.name || null,
         address_raw: row.address || null,
         detail_url: detailUrl,
-        hours_text: null
+        hours_text: row.hours || null
       });
     }
   }
 
-  const stores = Array.from(byBid.values());
-  await mapWithConcurrency(stores, 3, async (store) => {
-    store.hours_text = await fetchHoursText(page, store.detail_url);
-    return store;
-  });
-  return stores;
+  return Array.from(byBid.values());
 }
 
 async function main() {
