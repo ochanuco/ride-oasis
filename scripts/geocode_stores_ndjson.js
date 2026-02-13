@@ -26,7 +26,8 @@ function parseArgs(argv = process.argv) {
     output: null,
     existing: null,
     engineVersion: null,
-    geocodeEngine: 'geolonia/normalize-japanese-addresses'
+    geocodeEngine: 'geolonia/normalize-japanese-addresses',
+    japaneseAddressesApi: null
   };
 
   function readValue(flag, index) {
@@ -69,6 +70,11 @@ function parseArgs(argv = process.argv) {
       i += 1;
       continue;
     }
+    if (token === '--japanese-addresses-api') {
+      args.japaneseAddressesApi = readValue('--japanese-addresses-api', i);
+      i += 1;
+      continue;
+    }
     if (token === '--help' || token === '-h') {
       return { help: true };
     }
@@ -90,11 +96,12 @@ function printHelp() {
   console.log(
     [
       'Usage:',
-      '  node scripts/geocode_stores_ndjson.js --chain <chain> --input <file-or-dir> --output <file> [--existing <file-or-dir>] [--engine-version <version>]',
+      '  node scripts/geocode_stores_ndjson.js --chain <chain> --input <file-or-dir> --output <file> [--existing <file-or-dir>] [--engine-version <version>] [--japanese-addresses-api <url-or-file-url>]',
       '',
       'Examples:',
       '  node scripts/geocode_stores_ndjson.js --chain 7eleven --input data/7eleven/ndjson --output data/geocoded/stores_geocoded_7eleven.ndjson',
-      '  node scripts/geocode_stores_ndjson.js --chain lawson --input data/lawson/ndjson --existing data/geocoded --output data/geocoded/stores_geocoded_lawson.ndjson'
+      '  node scripts/geocode_stores_ndjson.js --chain lawson --input data/lawson/ndjson --existing data/geocoded --output data/geocoded/stores_geocoded_lawson.ndjson',
+      '  node scripts/geocode_stores_ndjson.js --chain lawson --input data/lawson/ndjson --output data/geocoded/stores_geocoded_lawson.ndjson --japanese-addresses-api file:///tmp/japanese-addresses/api/ja'
     ].join('\n')
   );
 }
@@ -253,7 +260,8 @@ function buildAddressCache(existingRows) {
   return cache;
 }
 
-async function createNormalizer() {
+async function createNormalizer(options = {}) {
+  const { japaneseAddressesApi } = options;
   let mod;
   try {
     mod = await import('@geolonia/normalize-japanese-addresses');
@@ -268,6 +276,9 @@ async function createNormalizer() {
   }
 
   return async (addressRaw) => {
+    if (japaneseAddressesApi) {
+      return await mod.normalize(addressRaw, { japaneseAddressesApi });
+    }
     return await mod.normalize(addressRaw);
   };
 }
@@ -385,7 +396,9 @@ async function main() {
 
   const scrapedRows = readNdjsonFromSpec(parsed.input, parsed.chain);
   const existingRows = parsed.existing ? readNdjsonFromSpec(parsed.existing, '') : [];
-  const normalizeAddress = await createNormalizer();
+  const normalizeAddress = await createNormalizer({
+    japaneseAddressesApi: parsed.japaneseAddressesApi
+  });
 
   const rows = await buildGeocodedRows({
     chain: parsed.chain,

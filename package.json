@@ -8,6 +8,9 @@
     "test:unit": "node --test tests/*.test.js",
     "playwright": "playwright",
     "pw:test": "playwright test",
+    "crawl:all": "bash scripts/crawl_all.sh",
+    "geocode:all": "bash scripts/geocode_all.sh",
+    "publish:all": "bash scripts/publish_geocoded_and_dataform.sh",
     "geocode:ndjson": "node scripts/geocode_stores_ndjson.js",
     "bq:upsert:geocoded": "node scripts/bq_upsert_geocoded.js"
   },

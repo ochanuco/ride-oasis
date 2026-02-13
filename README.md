@@ -64,6 +64,27 @@ node scripts/michi_no_eki_pref_ndjson.js --pref kochi
 node scripts/ministop_pref_ndjson.js --pref osaka
 node scripts/7eleven_pref_ndjson.js --pref all
 node scripts/7eleven_pref_ndjson.js --pref-list
+npm run crawl:all
+npm run geocode:all
+npm run publish:all
+```
+
+ローカルの住所データを使って geocode する場合（例）:
+
+```bash
+npm run geocode:ndjson -- \
+  --chain lawson \
+  --input data/lawson/ndjson \
+  --existing data/geocoded \
+  --output data/geocoded/stores_geocoded_lawson.ndjson \
+  --engine-version 3.1.3 \
+  --japanese-addresses-api file:///path/to/japanese-addresses/api/ja
+```
+
+`geocode:all` でも環境変数で同じ指定ができます:
+
+```bash
+JAPANESE_ADDRESSES_API=file:///path/to/japanese-addresses/api/ja npm run geocode:all
 ```
 
 取得済み NDJSON から `raw.stores_geocoded` 共通スキーマの NDJSON を作る:
