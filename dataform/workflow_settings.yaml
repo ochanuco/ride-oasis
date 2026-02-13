@@ -1,0 +1,5 @@
+dataformCoreVersion: 3.0.46
+defaultProject: chanukott
+defaultLocation: asia-northeast1
+defaultDataset: rideoasis
+defaultAssertionDataset: dataform_assertions

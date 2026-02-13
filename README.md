@@ -64,6 +64,27 @@ node scripts/michi_no_eki_pref_ndjson.js --pref kochi
 node scripts/ministop_pref_ndjson.js --pref osaka
 node scripts/7eleven_pref_ndjson.js --pref all
 node scripts/7eleven_pref_ndjson.js --pref-list
+npm run crawl:all
+npm run geocode:all
+npm run publish:all
+```
+
+ローカルの住所データを使って geocode する場合（例）:
+
+```bash
+npm run geocode:ndjson -- \
+  --chain lawson \
+  --input data/lawson/ndjson \
+  --existing data/geocoded \
+  --output data/geocoded/stores_geocoded_lawson.ndjson \
+  --engine-version 3.1.3 \
+  --japanese-addresses-api file:///path/to/japanese-addresses/api/ja
+```
+
+`geocode:all` でも環境変数で同じ指定ができます:
+
+```bash
+JAPANESE_ADDRESSES_API=file:///path/to/japanese-addresses/api/ja npm run geocode:all
 ```
 
 取得済み NDJSON から `raw.stores_geocoded` 共通スキーマの NDJSON を作る:
@@ -113,3 +134,15 @@ npm run bq:upsert:geocoded -- \
 
 - クローリング対象サイトの利用規約/robots を確認し、アクセス頻度を制限します。
 - `raw.stores_scraped_*` の詳細スキーマはクロール実装に合わせて確定します。
+
+## point_level 閾値メモ
+
+- `point_level` の閾値を下げると、未解決件数は減り、成功率は上がります。
+- ただし実世界の座標精度は下がりやすく、地図上のズレが増える可能性があります。
+- KPI改善（成功率上昇）は、必ずしも品質改善を意味しません。
+
+運用では次をセットで確認します。
+
+- `strict_success_rate`（`point_level >= 閾値` を満たす成功率）
+- `point_level` 分布（1 / 2 / 3 / 8 / null）
+- `unresolved_rows`（未解決件数）

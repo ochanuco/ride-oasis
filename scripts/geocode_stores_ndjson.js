@@ -26,7 +26,8 @@ function parseArgs(argv = process.argv) {
     output: null,
     existing: null,
     engineVersion: null,
-    geocodeEngine: 'geolonia/normalize-japanese-addresses'
+    geocodeEngine: 'geolonia/normalize-japanese-addresses',
+    japaneseAddressesApi: null
   };
 
   function readValue(flag, index) {
@@ -69,6 +70,11 @@ function parseArgs(argv = process.argv) {
       i += 1;
       continue;
     }
+    if (token === '--japanese-addresses-api') {
+      args.japaneseAddressesApi = readValue('--japanese-addresses-api', i);
+      i += 1;
+      continue;
+    }
     if (token === '--help' || token === '-h') {
       return { help: true };
     }
@@ -90,11 +96,12 @@ function printHelp() {
   console.log(
     [
       'Usage:',
-      '  node scripts/geocode_stores_ndjson.js --chain <chain> --input <file-or-dir> --output <file> [--existing <file-or-dir>] [--engine-version <version>]',
+      '  node scripts/geocode_stores_ndjson.js --chain <chain> --input <file-or-dir> --output <file> [--existing <file-or-dir>] [--engine-version <version>] [--japanese-addresses-api <url-or-file-url>]',
       '',
       'Examples:',
       '  node scripts/geocode_stores_ndjson.js --chain 7eleven --input data/7eleven/ndjson --output data/geocoded/stores_geocoded_7eleven.ndjson',
-      '  node scripts/geocode_stores_ndjson.js --chain lawson --input data/lawson/ndjson --existing data/geocoded --output data/geocoded/stores_geocoded_lawson.ndjson'
+      '  node scripts/geocode_stores_ndjson.js --chain lawson --input data/lawson/ndjson --existing data/geocoded --output data/geocoded/stores_geocoded_lawson.ndjson',
+      '  node scripts/geocode_stores_ndjson.js --chain lawson --input data/lawson/ndjson --output data/geocoded/stores_geocoded_lawson.ndjson --japanese-addresses-api file:///tmp/japanese-addresses/api/ja'
     ].join('\n')
   );
 }
@@ -253,7 +260,8 @@ function buildAddressCache(existingRows) {
   return cache;
 }
 
-async function createNormalizer() {
+async function createNormalizer(options = {}) {
+  const { japaneseAddressesApi } = options;
   let mod;
   try {
     mod = await import('@geolonia/normalize-japanese-addresses');
@@ -265,6 +273,13 @@ async function createNormalizer() {
 
   if (typeof mod.normalize !== 'function') {
     throw new Error('normalize function is not exported by @geolonia/normalize-japanese-addresses');
+  }
+
+  if (japaneseAddressesApi) {
+    if (!mod.config || typeof mod.config !== 'object') {
+      throw new Error('config is not exported by @geolonia/normalize-japanese-addresses');
+    }
+    mod.config.japaneseAddressesApi = japaneseAddressesApi;
   }
 
   return async (addressRaw) => {
@@ -280,16 +295,35 @@ async function buildGeocodedRows(options) {
     geocodeEngine,
     engineVersion,
     nowIso,
-    normalizeAddress
+    normalizeAddress,
+    onProgress
   } = options;
 
   const addressCache = buildAddressCache(existingRows || []);
   const latestRows = pickLatestByStoreId(scrapedRows || []);
   const outputRows = [];
+  const stats = {
+    processed: 0,
+    total: latestRows.length,
+    skipped_store_id: 0,
+    cache_hits: 0,
+    geocoded_new: 0,
+    geocode_errors: 0,
+    missing_address: 0
+  };
+
+  const reportProgress = () => {
+    if (typeof onProgress === 'function') {
+      onProgress({ ...stats });
+    }
+  };
 
   for (const row of latestRows) {
     const storeId = row?.store_id ? String(row.store_id) : null;
     if (!storeId) {
+      stats.processed += 1;
+      stats.skipped_store_id += 1;
+      reportProgress();
       continue;
     }
 
@@ -315,12 +349,18 @@ async function buildGeocodedRows(options) {
     };
 
     if (!addressRaw) {
+      stats.processed += 1;
+      stats.missing_address += 1;
+      stats.geocode_errors += 1;
       outputRows.push({ ...base, geocode_error: 'address_raw is missing' });
+      reportProgress();
       continue;
     }
 
     const cached = addressCache.get(addressRaw);
     if (cached) {
+      stats.processed += 1;
+      stats.cache_hits += 1;
       outputRows.push({
         ...base,
         ...cached,
@@ -329,6 +369,7 @@ async function buildGeocodedRows(options) {
         point_lat: asNumber(cached.point_lat),
         point_lng: asNumber(cached.point_lng)
       });
+      reportProgress();
       continue;
     }
 
@@ -344,6 +385,11 @@ async function buildGeocodedRows(options) {
         ...fields,
         geocode_error: geocodeError
       };
+      stats.processed += 1;
+      stats.geocoded_new += 1;
+      if (geocodeError) {
+        stats.geocode_errors += 1;
+      }
       outputRows.push(geocoded);
       addressCache.set(addressRaw, {
         address_norm: geocoded.address_norm,
@@ -358,11 +404,15 @@ async function buildGeocodedRows(options) {
         addr: geocoded.addr,
         other: geocoded.other
       });
+      reportProgress();
     } catch (err) {
+      stats.processed += 1;
+      stats.geocode_errors += 1;
       outputRows.push({
         ...base,
         geocode_error: err?.message || 'geocode failed'
       });
+      reportProgress();
     }
   }
 
@@ -385,7 +435,11 @@ async function main() {
 
   const scrapedRows = readNdjsonFromSpec(parsed.input, parsed.chain);
   const existingRows = parsed.existing ? readNdjsonFromSpec(parsed.existing, '') : [];
-  const normalizeAddress = await createNormalizer();
+  const normalizeAddress = await createNormalizer({
+    japaneseAddressesApi: parsed.japaneseAddressesApi
+  });
+  const startedAt = Date.now();
+  let lastLoggedProcessed = 0;
 
   const rows = await buildGeocodedRows({
     chain: parsed.chain,
@@ -394,7 +448,19 @@ async function main() {
     geocodeEngine: parsed.geocodeEngine,
     engineVersion: parsed.engineVersion,
     nowIso: new Date().toISOString(),
-    normalizeAddress
+    normalizeAddress,
+    onProgress: (progress) => {
+      const { processed, total } = progress;
+      const shouldLog = processed === total || processed === 1 || processed - lastLoggedProcessed >= 100;
+      if (!shouldLog) return;
+      lastLoggedProcessed = processed;
+
+      const pct = total > 0 ? ((processed / total) * 100).toFixed(1) : '100.0';
+      const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+      console.log(
+        `[progress] chain=${parsed.chain} ${processed}/${total} (${pct}%) elapsed=${elapsedSec}s cache=${progress.cache_hits} new=${progress.geocoded_new} errors=${progress.geocode_errors}`
+      );
+    }
   });
 
   writeNdjson(parsed.output, rows);

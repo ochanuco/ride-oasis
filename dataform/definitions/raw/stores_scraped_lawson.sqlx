@@ -1,0 +1,6 @@
+-- Lawson のスクレイピング生テーブルを宣言。
+config {
+  type: "declaration",
+  schema: "rideoasis_raw",
+  name: "stores_scraped_lawson"
+}

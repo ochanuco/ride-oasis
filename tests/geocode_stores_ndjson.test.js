@@ -26,6 +26,23 @@ test('CLI引数を正常に解釈できる', () => {
   assert.equal(result.geocodeEngine, 'geolonia/normalize-japanese-addresses');
 });
 
+test('--japanese-addresses-api を指定した場合は値を解釈できる', () => {
+  const result = parseArgs([
+    'node',
+    'scripts/geocode_stores_ndjson.js',
+    '--chain',
+    'lawson',
+    '--input',
+    'data/lawson/ndjson',
+    '--output',
+    'data/geocoded/stores_geocoded_lawson.ndjson',
+    '--japanese-addresses-api',
+    'file:///tmp/japanese-addresses/api/ja'
+  ]);
+
+  assert.equal(result.japaneseAddressesApi, 'file:///tmp/japanese-addresses/api/ja');
+});
+
 test('--chain が欠落している場合は例外を投げる', () => {
   assert.throws(
     () => parseArgs(['node', 'x', '--input', 'a', '--output', 'b']),
@@ -44,6 +61,13 @@ test('--input の値が欠落している場合は例外を投げる', () => {
   assert.throws(
     () => parseArgs(['node', 'x', '--chain', 'lawson', '--input', '--output', 'x.ndjson']),
     /--input requires a value/
+  );
+});
+
+test('--japanese-addresses-api の値が欠落している場合は例外を投げる', () => {
+  assert.throws(
+    () => parseArgs(['node', 'x', '--chain', 'lawson', '--input', 'a', '--output', 'b', '--japanese-addresses-api']),
+    /--japanese-addresses-api requires a value/
   );
 });
 
