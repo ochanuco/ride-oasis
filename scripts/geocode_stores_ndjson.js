@@ -291,12 +291,27 @@ async function buildGeocodedRows(options) {
     geocodeEngine,
     engineVersion,
     nowIso,
-    normalizeAddress
+    normalizeAddress,
+    onProgress
   } = options;
 
   const addressCache = buildAddressCache(existingRows || []);
   const latestRows = pickLatestByStoreId(scrapedRows || []);
   const outputRows = [];
+  const stats = {
+    processed: 0,
+    total: latestRows.length,
+    cache_hits: 0,
+    geocoded_new: 0,
+    geocode_errors: 0,
+    missing_address: 0
+  };
+
+  const reportProgress = () => {
+    if (typeof onProgress === 'function') {
+      onProgress({ ...stats });
+    }
+  };
 
   for (const row of latestRows) {
     const storeId = row?.store_id ? String(row.store_id) : null;
@@ -326,12 +341,18 @@ async function buildGeocodedRows(options) {
     };
 
     if (!addressRaw) {
+      stats.processed += 1;
+      stats.missing_address += 1;
+      stats.geocode_errors += 1;
       outputRows.push({ ...base, geocode_error: 'address_raw is missing' });
+      reportProgress();
       continue;
     }
 
     const cached = addressCache.get(addressRaw);
     if (cached) {
+      stats.processed += 1;
+      stats.cache_hits += 1;
       outputRows.push({
         ...base,
         ...cached,
@@ -340,6 +361,7 @@ async function buildGeocodedRows(options) {
         point_lat: asNumber(cached.point_lat),
         point_lng: asNumber(cached.point_lng)
       });
+      reportProgress();
       continue;
     }
 
@@ -355,6 +377,11 @@ async function buildGeocodedRows(options) {
         ...fields,
         geocode_error: geocodeError
       };
+      stats.processed += 1;
+      stats.geocoded_new += 1;
+      if (geocodeError) {
+        stats.geocode_errors += 1;
+      }
       outputRows.push(geocoded);
       addressCache.set(addressRaw, {
         address_norm: geocoded.address_norm,
@@ -369,11 +396,15 @@ async function buildGeocodedRows(options) {
         addr: geocoded.addr,
         other: geocoded.other
       });
+      reportProgress();
     } catch (err) {
+      stats.processed += 1;
+      stats.geocode_errors += 1;
       outputRows.push({
         ...base,
         geocode_error: err?.message || 'geocode failed'
       });
+      reportProgress();
     }
   }
 
@@ -399,6 +430,8 @@ async function main() {
   const normalizeAddress = await createNormalizer({
     japaneseAddressesApi: parsed.japaneseAddressesApi
   });
+  const startedAt = Date.now();
+  let lastLoggedProcessed = 0;
 
   const rows = await buildGeocodedRows({
     chain: parsed.chain,
@@ -407,7 +440,19 @@ async function main() {
     geocodeEngine: parsed.geocodeEngine,
     engineVersion: parsed.engineVersion,
     nowIso: new Date().toISOString(),
-    normalizeAddress
+    normalizeAddress,
+    onProgress: (progress) => {
+      const { processed, total } = progress;
+      const shouldLog = processed === total || processed === 1 || processed - lastLoggedProcessed >= 100;
+      if (!shouldLog) return;
+      lastLoggedProcessed = processed;
+
+      const pct = total > 0 ? ((processed / total) * 100).toFixed(1) : '100.0';
+      const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+      console.log(
+        `[progress] chain=${parsed.chain} ${processed}/${total} (${pct}%) elapsed=${elapsedSec}s cache=${progress.cache_hits} new=${progress.geocoded_new} errors=${progress.geocode_errors}`
+      );
+    }
   });
 
   writeNdjson(parsed.output, rows);
