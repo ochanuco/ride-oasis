@@ -1,0 +1,35 @@
+-- geocode 品質の日次集計（chain 別）。total/success/unresolved と成功率を算出。
+-- あわせて point_level の分布バケット（0-2, 3-5, 6-7, 8+）を出力。
+js {
+  const minPointLevel = 8;
+}
+
+config {
+  type: "view",
+  schema: "ops",
+  name: "metrics_daily"
+}
+
+select
+  date(geocoded_at) as metric_date,
+  chain,
+  count(*) as total_rows,
+  countif(point_lat is not null and point_lng is not null and geocode_error is null) as geocode_success_rows,
+  safe_divide(
+    countif(point_lat is not null and point_lng is not null and geocode_error is null),
+    count(*)
+  ) as geocode_success_rate,
+  countif(
+    point_lat is null
+    or point_lng is null
+    or point_level is null
+    or point_level < ${minPointLevel}
+    or geocode_error is not null
+  ) as unresolved_rows,
+  countif(point_level is null) as point_level_null_rows,
+  countif(point_level between 0 and 2) as point_level_0_2_rows,
+  countif(point_level between 3 and 5) as point_level_3_5_rows,
+  countif(point_level between 6 and 7) as point_level_6_7_rows,
+  countif(point_level >= ${minPointLevel}) as point_level_gte_${minPointLevel}_rows
+from ${ref("stores_geocode_latest_all")}
+group by metric_date, chain

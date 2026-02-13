@@ -1,0 +1,18 @@
+-- チェーン別 stores_latest を横断 UNION した統合ビュー。
+config {
+  type: "view",
+  schema: "stg",
+  name: "stores_latest_all"
+}
+
+select * from ${ref("stores_latest_7eleven")}
+union all
+select * from ${ref("stores_latest_lawson")}
+union all
+select * from ${ref("stores_latest_familymart")}
+union all
+select * from ${ref("stores_latest_daily_yamazaki")}
+union all
+select * from ${ref("stores_latest_michi_no_eki")}
+union all
+select * from ${ref("stores_latest_ministop")}

@@ -1,0 +1,6 @@
+-- 7-Eleven のスクレイピング生テーブルを宣言。
+config {
+  type: "declaration",
+  schema: "raw",
+  name: "stores_scraped_7eleven"
+}

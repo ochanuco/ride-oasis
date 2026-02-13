@@ -1,0 +1,6 @@
+-- Lawson のスクレイピング生テーブルを宣言。
+config {
+  type: "declaration",
+  schema: "raw",
+  name: "stores_scraped_lawson"
+}

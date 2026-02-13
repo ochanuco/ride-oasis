@@ -1,0 +1,35 @@
+-- 最終マート。supply_point_id（chain:store_id）単位で1行の供給地点を生成。
+config {
+  type: "view",
+  schema: "mart",
+  name: "rideoasis_supply_points"
+}
+
+with geocode as (
+  select *
+  from ${ref("stores_geocode_latest_all")}
+),
+stores as (
+  select *
+  from ${ref("stores_latest_all")}
+)
+select
+  concat(geocode.chain, ":", geocode.store_id) as supply_point_id,
+  geocode.chain,
+  geocode.store_id,
+  coalesce(stores.store_name, concat(geocode.chain, "-", geocode.store_id)) as name,
+  geocode.point_lat as lat,
+  geocode.point_lng as lng,
+  geocode.address_norm,
+  geocode.level as geocode_level,
+  geocode.point_level as geocode_point_level,
+  coalesce(stores.detail_url, stores.source_url) as source_url,
+  greatest(
+    coalesce(stores.scraped_at, timestamp("1970-01-01 00:00:00+00")),
+    coalesce(geocode.geocoded_at, timestamp("1970-01-01 00:00:00+00"))
+  ) as updated_at
+from geocode
+left join stores
+  on geocode.chain = stores.chain
+ and geocode.store_id = stores.store_id
+where geocode.store_id is not null

@@ -1,0 +1,28 @@
+-- 7-Eleven の geocode を (chain, store_id) 単位で最新化。
+config {
+  type: "view",
+  schema: "stg",
+  name: "stores_geocode_latest_7eleven"
+}
+
+select
+  chain,
+  store_id,
+  address_raw,
+  address_norm,
+  point_lat,
+  point_lng,
+  level,
+  point_level,
+  geocode_engine,
+  engine_version,
+  geocoded_at,
+  geocode_error,
+  pref,
+  city,
+  town,
+  addr,
+  other
+from ${ref("stores_geocoded")}
+where chain = "7eleven"
+qualify row_number() over (partition by chain, store_id order by geocoded_at desc) = 1

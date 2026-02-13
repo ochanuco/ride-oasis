@@ -1,0 +1,6 @@
+-- 道の駅のスクレイピング生テーブルを宣言。
+config {
+  type: "declaration",
+  schema: "raw",
+  name: "stores_scraped_michi_no_eki"
+}

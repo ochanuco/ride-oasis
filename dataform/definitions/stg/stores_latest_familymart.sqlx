@@ -1,0 +1,18 @@
+-- FamilyMart の store_id ごとに scraped_at 最新1件へ正規化。
+config {
+  type: "view",
+  schema: "stg",
+  name: "stores_latest_familymart"
+}
+
+select
+  "familymart" as chain,
+  store_id,
+  store_name,
+  address_raw,
+  source_url,
+  detail_url,
+  scraped_at
+from ${ref("stores_scraped_familymart")}
+where store_id is not null
+qualify row_number() over (partition by store_id order by scraped_at desc) = 1
