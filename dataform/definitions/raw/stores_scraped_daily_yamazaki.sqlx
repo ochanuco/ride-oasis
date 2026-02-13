@@ -1,6 +1,6 @@
 -- Daily Yamazaki のスクレイピング生テーブルを宣言。
 config {
   type: "declaration",
-  schema: "raw",
+  schema: "rideoasis_raw",
   name: "stores_scraped_daily_yamazaki"
 }

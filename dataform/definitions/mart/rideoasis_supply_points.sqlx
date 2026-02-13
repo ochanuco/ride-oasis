@@ -1,7 +1,7 @@
 -- 最終マート。supply_point_id（chain:store_id）単位で1行の供給地点を生成。
 config {
   type: "view",
-  schema: "mart",
+  schema: "rideoasis_mart",
   name: "rideoasis_supply_points"
 }
 

@@ -1,7 +1,7 @@
 -- チェーン別 stores_latest を横断 UNION した統合ビュー。
 config {
   type: "view",
-  schema: "stg",
+  schema: "rideoasis_stg",
   name: "stores_latest_all"
 }
 

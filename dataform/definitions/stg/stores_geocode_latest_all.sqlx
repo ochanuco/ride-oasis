@@ -1,7 +1,7 @@
 -- 全チェーンの geocode を (chain, store_id) 単位で最新化した統合ビュー。
 config {
   type: "view",
-  schema: "stg",
+  schema: "rideoasis_stg",
   name: "stores_geocode_latest_all"
 }
 

@@ -1,6 +1,6 @@
 -- Cloud Run が投入する geocode 済み生テーブル（チェーン共通スキーマ）を宣言。
 config {
   type: "declaration",
-  schema: "raw",
+  schema: "rideoasis_raw",
   name: "stores_geocoded"
 }

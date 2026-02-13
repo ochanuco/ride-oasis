@@ -1,7 +1,7 @@
 -- 7-Eleven の store_id ごとに scraped_at 最新1件へ正規化。
 config {
   type: "view",
-  schema: "stg",
+  schema: "rideoasis_stg",
   name: "stores_latest_7eleven"
 }
 

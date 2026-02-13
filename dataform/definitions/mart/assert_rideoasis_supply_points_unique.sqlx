@@ -1,7 +1,7 @@
 -- アサーション。最終マートで supply_point_id の重複を検知。
 config {
   type: "assertion",
-  schema: "mart",
+  schema: "rideoasis_mart",
   name: "assert_rideoasis_supply_points_unique"
 }
 

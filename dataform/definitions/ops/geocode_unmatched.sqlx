@@ -5,7 +5,7 @@ js {
 
 config {
   type: "view",
-  schema: "ops",
+  schema: "rideoasis_ops",
   name: "geocode_unmatched"
 }
 

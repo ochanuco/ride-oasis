@@ -1,7 +1,7 @@
 -- FamilyMart の geocode を (chain, store_id) 単位で最新化。
 config {
   type: "view",
-  schema: "stg",
+  schema: "rideoasis_stg",
   name: "stores_geocode_latest_familymart"
 }
 
