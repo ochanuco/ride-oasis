@@ -28,11 +28,11 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
+        env:
+          NODE_OPTIONS: --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml
         run: |
-          # `npm run test:unit -- ...` だと追加引数がテストファイル扱いになり得るため、
-          # reporter 指定は node コマンドで明示する。
           mkdir -p test-results
-          node --test --test-reporter=junit --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml tests/*.test.js
+          npm run test:unit
 
       - name: Upload test results
         if: always()
