@@ -30,7 +30,7 @@ jobs:
       - name: Run unit tests
         run: |
           mkdir -p test-results
-          node --test --test-reporter=junit --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml tests/*.test.js
+          npm run test:unit -- --test-reporter=junit --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml tests/*.test.js
 
       - name: Upload test results
         if: always()
