@@ -275,10 +275,14 @@ async function createNormalizer(options = {}) {
     throw new Error('normalize function is not exported by @geolonia/normalize-japanese-addresses');
   }
 
-  return async (addressRaw) => {
-    if (japaneseAddressesApi) {
-      return await mod.normalize(addressRaw, { japaneseAddressesApi });
+  if (japaneseAddressesApi) {
+    if (!mod.config || typeof mod.config !== 'object') {
+      throw new Error('config is not exported by @geolonia/normalize-japanese-addresses');
     }
+    mod.config.japaneseAddressesApi = japaneseAddressesApi;
+  }
+
+  return async (addressRaw) => {
     return await mod.normalize(addressRaw);
   };
 }
@@ -301,6 +305,7 @@ async function buildGeocodedRows(options) {
   const stats = {
     processed: 0,
     total: latestRows.length,
+    skipped_store_id: 0,
     cache_hits: 0,
     geocoded_new: 0,
     geocode_errors: 0,
@@ -316,6 +321,9 @@ async function buildGeocodedRows(options) {
   for (const row of latestRows) {
     const storeId = row?.store_id ? String(row.store_id) : null;
     if (!storeId) {
+      stats.processed += 1;
+      stats.skipped_store_id += 1;
+      reportProgress();
       continue;
     }
 
