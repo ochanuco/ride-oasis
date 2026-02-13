@@ -28,9 +28,11 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
+        env:
+          NODE_OPTIONS: --test-reporter=junit --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml
         run: |
           mkdir -p test-results
-          npm run test:unit -- --test-reporter=junit --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml tests/*.test.js
+          npm run test:unit
 
       - name: Upload test results
         if: always()
