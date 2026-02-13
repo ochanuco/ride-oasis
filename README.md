@@ -144,5 +144,5 @@ npm run bq:upsert:geocoded -- \
 運用では次をセットで確認します。
 
 - `strict_success_rate`（`point_level >= 閾値` を満たす成功率）
-- `point_level` 分布（0-2 / 3-5 / 6-7 / 8+）
+- `point_level` 分布（1 / 2 / 3 / 8 / null）
 - `unresolved_rows`（未解決件数）
