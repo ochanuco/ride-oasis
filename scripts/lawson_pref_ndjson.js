@@ -19,6 +19,7 @@ const PREF_CODES = [
 
 const SOURCE_URL = 'https://www.e-map.ne.jp/p/lawson/';
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
+const DEFAULT_AREA_CONCURRENCY = 4;
 
 function parsePrefArg() {
   return resolvePrefArg({
@@ -122,6 +123,26 @@ async function extractStoresFromCurrentPage(page, listUrl) {
   }, { sourceUrl: SOURCE_URL, listUrlParam: listUrl });
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const result = new Array(items.length);
+  let index = 0;
+
+  async function worker() {
+    while (true) {
+      const current = index;
+      index += 1;
+      if (current >= items.length) break;
+      result[current] = await mapper(items[current], current);
+    }
+  }
+
+  const workers = [];
+  const count = Math.max(1, Math.min(limit, items.length));
+  for (let i = 0; i < count; i += 1) workers.push(worker());
+  await Promise.all(workers);
+  return result;
+}
+
 async function fetchStoresByArea(page, areaUrl) {
   const ok = await gotoWithRetry(page, areaUrl);
   if (!ok) return [];
@@ -154,10 +175,23 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
 
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({
+  const context = await browser.newContext({
     userAgent: DEFAULT_USER_AGENT,
     locale: 'ja-JP'
   });
+  await context.route('**/*', (route) => {
+    const req = route.request();
+    const url = req.url();
+    const type = req.resourceType();
+    if (url.includes('google-analytics.com') || url.includes('googletagmanager.com')) {
+      return route.abort();
+    }
+    if (type === 'image' || type === 'font' || type === 'media') {
+      return route.abort();
+    }
+    return route.continue();
+  });
+  const page = await context.newPage();
 
   try {
     const onlyPref = parsePrefArg();
@@ -174,16 +208,30 @@ async function main() {
 
       const areaUrls = await extractAreaUrlsFromPage(page);
       console.log(`pref ${pref}: areas ${areaUrls.length}`);
+      const areaConcurrency = Math.max(
+        1,
+        Number.parseInt(process.env.LAWSON_AREA_CONCURRENCY || `${DEFAULT_AREA_CONCURRENCY}`, 10) || DEFAULT_AREA_CONCURRENCY
+      );
+      console.log(`pref ${pref}: area concurrency ${areaConcurrency}`);
 
       const scrapedAt = new Date().toISOString();
       const byStoreId = new Map();
+      let done = 0;
 
-      let idx = 0;
-      for (const areaUrl of areaUrls) {
-        idx += 1;
-        console.log(`pref ${pref}: area ${idx}/${areaUrls.length}`);
-        const stores = await fetchStoresByArea(page, areaUrl);
-        for (const store of stores) {
+      const storesByArea = await mapWithConcurrency(areaUrls, areaConcurrency, async (areaUrl, idx) => {
+        const workerPage = await context.newPage();
+        try {
+          const stores = await fetchStoresByArea(workerPage, areaUrl);
+          done += 1;
+          console.log(`pref ${pref}: area ${done}/${areaUrls.length} (idx=${idx + 1}) stores=${stores.length}`);
+          return stores;
+        } finally {
+          await workerPage.close();
+        }
+      });
+
+      for (const stores of storesByArea) {
+        for (const store of stores || []) {
           if (!byStoreId.has(store.store_id)) {
             byStoreId.set(store.store_id, store);
           }
@@ -211,6 +259,7 @@ async function main() {
       }
     }
   } finally {
+    await context.close();
     await browser.close();
   }
 }
