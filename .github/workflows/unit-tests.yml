@@ -29,6 +29,8 @@ jobs:
 
       - name: Run unit tests
         run: |
+          # `npm run test:unit -- ...` だと追加引数がテストファイル扱いになり得るため、
+          # reporter 指定は node コマンドで明示する。
           mkdir -p test-results
           node --test --test-reporter=junit --test-reporter-destination=test-results/junit-node-${{ matrix.node-version }}.xml tests/*.test.js
 
