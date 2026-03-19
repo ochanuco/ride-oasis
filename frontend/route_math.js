@@ -5,15 +5,18 @@
   }
   root.RouteMath = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  /** Converts decimal degrees to radians. */
   function toRadians(value) {
     return (value * Math.PI) / 180;
   }
 
+  /** Computes the mean latitude used for a lightweight local projection. */
   function meanLatitude(coords) {
     if (!coords.length) return 0;
     return coords.reduce((sum, coord) => sum + coord[1], 0) / coords.length;
   }
 
+  /** Projects lon/lat coordinates to approximate planar meters near the route. */
   function projectLonLatToMeters(coord, referenceLat) {
     const lng = coord[0];
     const lat = coord[1];
@@ -23,6 +26,7 @@
     return [x, y];
   }
 
+  /** Computes the minimum distance from a point to a single route segment. */
   function distancePointToSegmentMeters(point, start, end, referenceLat) {
     const p = projectLonLatToMeters(point, referenceLat);
     const a = projectLonLatToMeters(start, referenceLat);
@@ -43,6 +47,7 @@
     return Math.hypot(p[0] - closestX, p[1] - closestY);
   }
 
+  /** Computes the minimum point-to-route distance in meters. */
   function pointToRouteDistanceMeters(point, coordinates) {
     if (!Array.isArray(coordinates) || coordinates.length < 2) {
       return Number.POSITIVE_INFINITY;
@@ -63,6 +68,7 @@
     return minDistance;
   }
 
+  /** Converts a meter padding value to degree deltas around a latitude. */
   function metersToDegreePadding(latitude, meters) {
     const latPadding = meters / 111320;
     const cosLat = Math.cos(toRadians(latitude));
@@ -70,6 +76,7 @@
     return { latPadding, lngPadding };
   }
 
+  /** Computes a [minLng, minLat, maxLng, maxLat] bbox from route coordinates. */
   function computeBbox(coordinates) {
     if (!coordinates.length) return null;
     let minLng = coordinates[0][0];
@@ -87,6 +94,7 @@
     return [minLng, minLat, maxLng, maxLat];
   }
 
+  /** Expands a bbox by a meter padding converted around the route center latitude. */
   function expandBbox(bbox, meters) {
     if (!bbox) return null;
     const [, minLat, , maxLat] = bbox;

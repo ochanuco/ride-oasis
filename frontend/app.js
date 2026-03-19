@@ -91,16 +91,19 @@ let routeCoordinates = [];
 let matchedPoints = [];
 let activeSupplyPointId = null;
 
+/** Updates the top-right status badge. */
 function setStatus(message) {
   elements.status.textContent = message;
 }
 
+/** Returns the currently enabled chain filters from the UI. */
 function selectedChains() {
   return Array.from(document.querySelectorAll('.chains input[type="checkbox"]:checked')).map(
     (input) => input.value
   );
 }
 
+/** Renders the matched supply point list beside the map. */
 function buildPointList(points) {
   elements.pointList.innerHTML = '';
   if (points.length === 0) {
@@ -129,6 +132,7 @@ function buildPointList(points) {
   }
 }
 
+/** Escapes text before inserting it into HTML fragments. */
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -138,6 +142,7 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+/** Allows only http/https URLs for outbound source links shown in the popup. */
 function safeExternalUrl(value) {
   if (!value) return null;
   try {
@@ -151,6 +156,7 @@ function safeExternalUrl(value) {
   }
 }
 
+/** Builds the popup HTML for a selected supply point. */
 function buildPopupHtml(props) {
   const safeUrl = safeExternalUrl(props.source_url);
   const link = safeUrl
@@ -167,6 +173,7 @@ function buildPopupHtml(props) {
   ].join('');
 }
 
+/** Marks one supply point active and opens its popup. */
 function activatePoint(supplyPointId) {
   activeSupplyPointId = supplyPointId;
   for (const feature of pointSource.getFeatures()) {
@@ -181,6 +188,7 @@ function activatePoint(supplyPointId) {
   buildPointList(matchedPoints);
 }
 
+/** Clears popup and active marker state. */
 function clearPopup() {
   activeSupplyPointId = null;
   elements.popup.hidden = true;
@@ -191,12 +199,14 @@ function clearPopup() {
   buildPointList(matchedPoints);
 }
 
+/** Updates summary cards for route points, candidates, and matches. */
 function updateSummary(candidateCount, matchedCount) {
   elements.routePointCount.textContent = routeCoordinates.length ? String(routeCoordinates.length) : '-';
   elements.candidateCount.textContent = String(candidateCount);
   elements.matchedCount.textContent = String(matchedCount);
 }
 
+/** Renders the uploaded route and its start/end markers. */
 function renderRoute(feature) {
   routeSource.clear();
   endpointSource.clear();
@@ -216,6 +226,7 @@ function renderRoute(feature) {
   }
 }
 
+/** Converts matched GeoJSON points into OpenLayers features. */
 function renderMatchedPoints(points) {
   pointSource.clear();
   const features = points.map((feature) => {
@@ -229,6 +240,7 @@ function renderMatchedPoints(points) {
   pointSource.addFeatures(features);
 }
 
+/** Fits the map view to the currently visible route and points. */
 function fitToVisibleData() {
   const extent = ol.extent.createEmpty();
   let hasData = false;
@@ -244,17 +256,20 @@ function fitToVisibleData() {
   }
 }
 
+/** Parses GPX text and converts it into an OpenLayers route feature. */
 function createRouteFeatureFromGpx(gpxText) {
   const parsed = window.GpxParser.parseGpxText(gpxText);
   routeCoordinates = parsed.geometry.coordinates;
   return routeGeoJsonFormat.readFeature(parsed);
 }
 
+/** Expands the route bbox so the API can return nearby candidate points. */
 function expandedBboxForQuery(distanceMeters) {
   const routeBbox = window.RouteMath.computeBbox(routeCoordinates);
   return window.RouteMath.expandBbox(routeBbox, Math.max(distanceMeters, 2000));
 }
 
+/** Loads candidate supply points from the local API for the current filters. */
 async function fetchCandidatePoints(distanceMeters) {
   const chains = selectedChains();
   const minPointLevel = Number(elements.minPointLevel.value) || 8;
@@ -276,6 +291,7 @@ async function fetchCandidatePoints(distanceMeters) {
   return response.json();
 }
 
+/** Applies the browser-side point-to-route distance filter. */
 function filterMatchedPoints(featureCollection, distanceMeters) {
   return featureCollection.features
     .map((feature) => {
@@ -295,6 +311,7 @@ function filterMatchedPoints(featureCollection, distanceMeters) {
     .sort((a, b) => a.properties.route_distance_m - b.properties.route_distance_m);
 }
 
+/** Refreshes API candidates and matched points for the loaded route. */
 async function refreshMap() {
   if (!routeCoordinates.length) {
     setStatus('先に GPX を読み込んでください');
@@ -319,6 +336,7 @@ async function refreshMap() {
   }
 }
 
+/** Reads the selected GPX file and triggers the initial map render. */
 async function handleGpxFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -336,6 +354,7 @@ async function handleGpxFile(event) {
   }
 }
 
+/** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   elements.gpxFile.addEventListener('change', handleGpxFile);
   elements.refresh.addEventListener('click', refreshMap);

@@ -14,6 +14,7 @@ const {
 
 const DEFAULT_BQ_TIMEOUT_MS = 10 * 60 * 1000;
 
+/** Prints usage for the local BigQuery-to-SQLite export command. */
 function printHelp() {
   console.log([
     'Usage:',
@@ -24,6 +25,7 @@ function printHelp() {
   ].join('\n'));
 }
 
+/** Builds the bq CLI arguments for exporting mart rows as JSON. */
 function buildBqArgs(options) {
   const args = ['--project_id', options.project];
   if (options.location) {
@@ -34,6 +36,7 @@ function buildBqArgs(options) {
   return args;
 }
 
+/** Fetches mart rows from BigQuery via the bq CLI. */
 function fetchMartRows(options) {
   const args = buildBqArgs(options);
   const output = execFileSync('bq', args, {
@@ -44,10 +47,12 @@ function fetchMartRows(options) {
   return JSON.parse(output);
 }
 
+/** Ensures the SQLite output directory exists. */
 function ensureParentDirectory(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
+/** Replaces the local SQLite table contents with the exported mart rows. */
 function writeRowsToSqlite(rows, outputPath) {
   ensureParentDirectory(outputPath);
   const database = new DatabaseSync(outputPath);
@@ -76,6 +81,7 @@ function writeRowsToSqlite(rows, outputPath) {
   return count;
 }
 
+/** Runs the local export CLI entrypoint. */
 function main() {
   const args = parseExportArgs(process.argv);
   if (args.help) {

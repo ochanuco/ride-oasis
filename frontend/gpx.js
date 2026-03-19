@@ -8,6 +8,7 @@
   const POINT_TAG_RE = /<(trkpt|rtept)\b([^>]*)>/gi;
   const ATTR_RE = /\b(lat|lon)\s*=\s*(['"])(.*?)\2/gi;
 
+  /** Extracts ordered [lng, lat] coordinates from GPX track or route point tags. */
   function parseCoordinateTokens(gpxText) {
     const coords = [];
     let tagMatch;
@@ -26,6 +27,7 @@
     return coords;
   }
 
+  /** Parses GPX text into a GeoJSON LineString feature for the route viewer. */
   function parseGpxText(gpxText) {
     const coordinates = parseCoordinateTokens(String(gpxText || ''));
     if (coordinates.length < 2) {

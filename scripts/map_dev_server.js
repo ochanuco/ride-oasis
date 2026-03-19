@@ -20,6 +20,7 @@ const MIME_TYPES = {
   '.gpx': 'application/gpx+xml; charset=utf-8'
 };
 
+/** Prints usage for the local static frontend and API server. */
 function printHelp() {
   console.log([
     'Usage:',
@@ -29,6 +30,7 @@ function printHelp() {
   ].join('\n'));
 }
 
+/** Creates the supply point API handler backed by the local SQLite database. */
 function createApiHandler(database) {
   return function handleSupplyPoints(request, requestUrl, response) {
     try {
@@ -46,6 +48,7 @@ function createApiHandler(database) {
   };
 }
 
+/** Resolves a request pathname to a file under frontend/. */
 function resolveStaticPath(requestPathname) {
   const relative = requestPathname === '/' ? '/index.html' : requestPathname;
   const normalized = path
@@ -55,6 +58,7 @@ function resolveStaticPath(requestPathname) {
   return path.join(FRONTEND_DIR, normalized);
 }
 
+/** Serves a static frontend asset from frontend/. */
 function serveStaticFile(requestPathname, response) {
   const filePath = resolveStaticPath(requestPathname);
   if (!filePath.startsWith(FRONTEND_DIR)) {
@@ -75,6 +79,7 @@ function serveStaticFile(requestPathname, response) {
   return fs.createReadStream(filePath).pipe(response);
 }
 
+/** Creates the local HTTP server for static assets and API requests. */
 function createServer(database) {
   const handleSupplyPoints = createApiHandler(database);
 
@@ -117,6 +122,7 @@ function createServer(database) {
   });
 }
 
+/** Runs the local map development server CLI entrypoint. */
 function main() {
   const args = parseServerArgs(process.argv);
   if (args.help) {
