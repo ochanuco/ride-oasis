@@ -154,9 +154,10 @@ npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787
 MVP の仕様:
 
 - API は `GET /api/supply-points` を返します
-- サーバ側では bbox / chain / `min_point_level` で絞り込みます
+- サーバ側では `bbox` / `chains` / `min_point_level` / `limit` で絞り込みます
 - 経路からの最短距離判定はブラウザ側で行います
 - 近傍距離はメートルで調整できます
+- `node:sqlite` を使うため、ローカル実行は Node.js `>=22.5.0` 前提です
 
 ## 注意事項
 

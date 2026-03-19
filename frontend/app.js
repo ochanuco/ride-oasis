@@ -134,12 +134,27 @@ function escapeHtml(value) {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function safeExternalUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value));
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return url.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function buildPopupHtml(props) {
-  const link = props.source_url
-    ? `<a href="${escapeHtml(props.source_url)}" target="_blank" rel="noreferrer">source</a>`
+  const safeUrl = safeExternalUrl(props.source_url);
+  const link = safeUrl
+    ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">source</a>`
     : '-';
   return [
     `<strong>${escapeHtml(props.name)}</strong>`,

@@ -12,6 +12,8 @@ const {
   sanitizeSqlitePath
 } = require('../lib/map_data');
 
+const DEFAULT_BQ_TIMEOUT_MS = 10 * 60 * 1000;
+
 function printHelp() {
   console.log([
     'Usage:',
@@ -36,7 +38,8 @@ function fetchMartRows(options) {
   const args = buildBqArgs(options);
   const output = execFileSync('bq', args, {
     encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024
+    maxBuffer: 256 * 1024 * 1024,
+    timeout: DEFAULT_BQ_TIMEOUT_MS
   });
   return JSON.parse(output);
 }
@@ -103,6 +106,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_BQ_TIMEOUT_MS,
   buildBqArgs,
   fetchMartRows,
   writeRowsToSqlite

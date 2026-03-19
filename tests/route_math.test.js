@@ -18,6 +18,20 @@ test('Route Math: GPX から trkpt を順序通り抽出できる', () => {
   ]);
 });
 
+test('Route Math: 属性順やシングルクォートが異なる GPX も抽出できる', () => {
+  const coords = parseCoordinateTokens([
+    "<gpx><trk><trkseg>",
+    "<trkpt lon='139.2' lat='35.2'></trkpt>",
+    "<rtept foo='x' lat=\"35.3\" bar='y' lon=\"139.3\"></rtept>",
+    '</trkseg></trk></gpx>'
+  ].join(''));
+
+  assert.deepEqual(coords, [
+    [139.2, 35.2],
+    [139.3, 35.3]
+  ]);
+});
+
 test('Route Math: 2点未満の GPX は例外を投げる', () => {
   assert.throws(() => parseGpxText('<gpx><trkpt lat="35" lon="139"></trkpt></gpx>'), /2点以上/);
 });

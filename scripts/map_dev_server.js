@@ -4,6 +4,7 @@ const http = require('node:http');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
+  ValidationError,
   parseServerArgs,
   parseSupplyPointFilters,
   buildSupplyPointsQuery,
@@ -38,7 +39,8 @@ function createApiHandler(database) {
       response.writeHead(200, { 'content-type': 'application/geo+json; charset=utf-8' });
       response.end(request.method === 'HEAD' ? '' : payload);
     } catch (error) {
-      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      const status = error instanceof ValidationError ? 400 : 500;
+      response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
       response.end(request.method === 'HEAD' ? '' : JSON.stringify({ error: error?.message || String(error) }));
     }
   };
@@ -77,7 +79,14 @@ function createServer(database) {
   const handleSupplyPoints = createApiHandler(database);
 
   return http.createServer((request, response) => {
-    const requestUrl = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+    let requestUrl;
+    try {
+      requestUrl = new URL(request.url, 'http://localhost');
+    } catch (error) {
+      response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: error?.message || 'invalid request url' }));
+      return;
+    }
 
     if ((request.method === 'GET' || request.method === 'HEAD') && requestUrl.pathname === '/api/supply-points') {
       handleSupplyPoints(request, requestUrl, response);

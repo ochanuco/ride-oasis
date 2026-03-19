@@ -16,6 +16,9 @@
     "export:map-db": "node scripts/export_map_db.js",
     "map:serve": "node scripts/map_dev_server.js"
   },
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/ochanuco/ride-oasis.git"

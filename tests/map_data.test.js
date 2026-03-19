@@ -12,7 +12,9 @@ const {
   parseExportArgs,
   parseServerArgs,
   parseSupplyPointFilters,
-  toFeatureCollection
+  toFeatureCollection,
+  validateProjectId,
+  ValidationError
 } = require('../lib/map_data');
 
 test('Map Data: export 用CLI引数を正常に解釈できる', () => {
@@ -66,8 +68,12 @@ test('Map Data: BigQuery SELECT SQL に null 除外が含まれる', () => {
   assert.match(sql, /FROM `rideoasis-dev\.rideoasis_mart\.rideoasis_supply_points`/);
 });
 
+test('Map Data: 不正な project id は例外を投げる', () => {
+  assert.throws(() => validateProjectId('bad.project'), ValidationError);
+});
+
 test('Map Data: export 用 bq query は 100 件上限を外す', () => {
-  const { buildBqArgs } = require('../scripts/export_map_db');
+  const { DEFAULT_BQ_TIMEOUT_MS, buildBqArgs } = require('../scripts/export_map_db');
   const args = buildBqArgs({
     project: 'rideoasis-dev',
     dataset: 'rideoasis_mart',
@@ -75,6 +81,7 @@ test('Map Data: export 用 bq query は 100 件上限を外す', () => {
     location: null
   });
   assert.ok(args.includes('--max_rows=1000000000'));
+  assert.equal(DEFAULT_BQ_TIMEOUT_MS, 10 * 60 * 1000);
 });
 
 test('Map Data: null 座標の行は normalize 時に除外される', () => {
