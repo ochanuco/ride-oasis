@@ -75,8 +75,21 @@ function serveStaticFile(requestPathname, response) {
 
   const ext = path.extname(filePath);
   const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
-  response.writeHead(200, { 'content-type': mimeType });
-  return fs.createReadStream(filePath).pipe(response);
+  const stream = fs.createReadStream(filePath);
+  stream.on('open', () => {
+    response.writeHead(200, { 'content-type': mimeType });
+    stream.pipe(response);
+  });
+  stream.on('error', (error) => {
+    if (response.headersSent) {
+      response.destroy(error);
+      return;
+    }
+    const status = error?.code === 'ENOENT' ? 404 : 500;
+    response.writeHead(status);
+    response.end(status === 404 ? 'not found' : 'internal server error');
+  });
+  return stream;
 }
 
 /** Creates the local HTTP server for static assets and API requests. */

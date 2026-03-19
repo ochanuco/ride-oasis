@@ -90,6 +90,7 @@ let routeFeature = null;
 let routeCoordinates = [];
 let matchedPoints = [];
 let activeSupplyPointId = null;
+const API_PAGE_LIMIT = 10000;
 
 /** Updates the top-right status badge. */
 function setStatus(message) {
@@ -274,21 +275,42 @@ async function fetchCandidatePoints(distanceMeters) {
   const chains = selectedChains();
   const minPointLevel = Number(elements.minPointLevel.value) || 8;
   const bbox = expandedBboxForQuery(distanceMeters);
-  const params = new URLSearchParams();
-  if (bbox) {
-    params.set('bbox', bbox.join(','));
-  }
-  if (chains.length > 0) {
-    params.set('chains', chains.join(','));
-  }
-  params.set('min_point_level', String(minPointLevel));
-  params.set('limit', '10000');
+  const features = [];
+  const seenIds = new Set();
+  let offset = 0;
 
-  const response = await fetch(`${API_BASE}/supply-points?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`API error (${response.status})`);
+  while (true) {
+    const params = new URLSearchParams();
+    if (bbox) {
+      params.set('bbox', bbox.join(','));
+    }
+    params.set('chains', chains.length > 0 ? chains.join(',') : '');
+    params.set('min_point_level', String(minPointLevel));
+    params.set('limit', String(API_PAGE_LIMIT));
+    params.set('offset', String(offset));
+
+    const response = await fetch(`${API_BASE}/supply-points?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`API error (${response.status})`);
+    }
+    const page = await response.json();
+    for (const feature of page.features) {
+      const id = feature.properties?.supply_point_id;
+      if (id && !seenIds.has(id)) {
+        seenIds.add(id);
+        features.push(feature);
+      }
+    }
+    if (page.features.length < API_PAGE_LIMIT) {
+      break;
+    }
+    offset += API_PAGE_LIMIT;
   }
-  return response.json();
+
+  return {
+    type: 'FeatureCollection',
+    features
+  };
 }
 
 /** Applies the browser-side point-to-route distance filter. */

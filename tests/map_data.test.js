@@ -7,9 +7,11 @@ const {
   buildSupplyPointsQuery,
   createSchemaSql,
   createUpsertStatement,
+  MAX_LIMIT,
   normalizePointRow,
   parseBBox,
   parseExportArgs,
+  parseNonNegativeInt,
   parseServerArgs,
   parseSupplyPointFilters,
   toFeatureCollection,
@@ -60,6 +62,32 @@ test('Map Data: supply point filters を既定値付きで解釈できる', () =
   assert.equal(filters.chains.length, 2);
   assert.equal(filters.minPointLevel, 8);
   assert.equal(filters.limit, 5000);
+  assert.equal(filters.offset, 0);
+});
+
+test('Map Data: chains が空文字なら明示的な0件指定として扱う', () => {
+  const filters = parseSupplyPointFilters(new URLSearchParams('chains='));
+  assert.deepEqual(filters.chains, []);
+  const { sql } = buildSupplyPointsQuery({
+    bbox: null,
+    chains: filters.chains,
+    minPointLevel: 8,
+    limit: 100,
+    offset: 0
+  });
+  assert.match(sql, /0 = 1/);
+});
+
+test('Map Data: limit の上限を超えると例外を投げる', () => {
+  assert.throws(
+    () => parseSupplyPointFilters(new URLSearchParams(`limit=${MAX_LIMIT + 1}`)),
+    /limit must be <=/
+  );
+});
+
+test('Map Data: offset は非負整数のみ許可する', () => {
+  assert.equal(parseNonNegativeInt('0', 'offset', 99), 0);
+  assert.throws(() => parseNonNegativeInt('-1', 'offset', 0), /non-negative/);
 });
 
 test('Map Data: BigQuery SELECT SQL に null 除外が含まれる', () => {
@@ -137,13 +165,15 @@ test('Map Data: API query が bbox と chain と point_level を反映する', (
     bbox: { minLng: 139, minLat: 35, maxLng: 140, maxLat: 36 },
     chains: ['lawson', 'familymart'],
     minPointLevel: 8,
-    limit: 123
+    limit: 123,
+    offset: 456
   });
 
   assert.match(sql, /lng BETWEEN :minLng AND :maxLng/);
   assert.match(sql, /chain IN \(:chain0, :chain1\)/);
   assert.match(sql, /geocode_point_level >= :minPointLevel/);
   assert.equal(params.limit, 123);
+  assert.equal(params.offset, 456);
   assert.equal(params.chain0, 'lawson');
 });
 
