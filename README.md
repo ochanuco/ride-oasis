@@ -48,6 +48,7 @@
 
 - `apps/`: Cloud Run ジョブ/サービス
 - `dataform/`: Dataform 定義
+- `frontend/`: 補給地点マップの静的 UI
 - `terraform/`: IaC
 - `skills/`: 本リポジトリ用の作業スキル
 
@@ -129,6 +130,33 @@ npm run bq:upsert:geocoded -- \
 - `ministop` は配信 JSON（`_next/data/.../map.json`）を利用するため高速
 - 取得元データに存在しない場合、`detail_url` は出力しません
 - `bq:upsert:geocoded` は `schemas/raw/stores_geocoded.json` を使って一時テーブルへロードし、`chain + store_id` 単位で最新 `geocoded_at` を残す Upsert を行います
+
+## 補給地点マップ（ローカルMVP）
+
+`mart.rideoasis_supply_points` をローカル `sqlite` にエクスポートし、GPX 経路の近傍にある補給地点を OpenLayers で確認できます。
+
+1. BigQuery からローカル DB を作る
+
+```bash
+npm run export:map-db -- \
+  --project your-gcp-project \
+  --output ./.local/rideoasis-map.db
+```
+
+2. ローカルサーバを起動する
+
+```bash
+npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787
+```
+
+3. ブラウザで `http://localhost:8787` を開き、GPX ファイルを選ぶ
+
+MVP の仕様:
+
+- API は `GET /api/supply-points` を返します
+- サーバ側では bbox / chain / `min_point_level` で絞り込みます
+- 経路からの最短距離判定はブラウザ側で行います
+- 近傍距離はメートルで調整できます
 
 ## 注意事項
 

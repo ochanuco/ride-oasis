@@ -8,3 +8,4 @@ dataform/.df-credentials.json
 playwright-report/
 test-results/
 data/
+.local/

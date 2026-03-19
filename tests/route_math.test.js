@@ -1,0 +1,62 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { computeBbox, expandBbox, pointToRouteDistanceMeters } = require('../frontend/route_math');
+const { parseCoordinateTokens, parseGpxText } = require('../frontend/gpx');
+
+test('Route Math: GPX から trkpt を順序通り抽出できる', () => {
+  const coords = parseCoordinateTokens([
+    '<gpx><trk><trkseg>',
+    '<trkpt lat="35.0" lon="139.0"></trkpt>',
+    '<trkpt lat="35.1" lon="139.1"></trkpt>',
+    '</trkseg></trk></gpx>'
+  ].join(''));
+
+  assert.deepEqual(coords, [
+    [139.0, 35.0],
+    [139.1, 35.1]
+  ]);
+});
+
+test('Route Math: 2点未満の GPX は例外を投げる', () => {
+  assert.throws(() => parseGpxText('<gpx><trkpt lat="35" lon="139"></trkpt></gpx>'), /2点以上/);
+});
+
+test('Route Math: bbox を算出できる', () => {
+  assert.deepEqual(
+    computeBbox([
+      [139.3, 35.3],
+      [139.0, 35.1],
+      [139.2, 35.5]
+    ]),
+    [139.0, 35.1, 139.3, 35.5]
+  );
+});
+
+test('Route Math: bbox をメートル相当で拡張できる', () => {
+  const expanded = expandBbox([139.0, 35.0, 139.1, 35.1], 1000);
+  assert.ok(expanded[0] < 139.0);
+  assert.ok(expanded[2] > 139.1);
+});
+
+test('Route Math: 経路上の点はほぼゼロ距離になる', () => {
+  const distance = pointToRouteDistanceMeters(
+    [139.05, 35.0],
+    [
+      [139.0, 35.0],
+      [139.1, 35.0]
+    ]
+  );
+  assert.ok(distance < 1);
+});
+
+test('Route Math: 経路から離れた点は数百メートル以上になる', () => {
+  const distance = pointToRouteDistanceMeters(
+    [139.05, 35.01],
+    [
+      [139.0, 35.0],
+      [139.1, 35.0]
+    ]
+  );
+  assert.ok(distance > 500);
+});
