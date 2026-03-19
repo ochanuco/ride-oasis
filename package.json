@@ -12,7 +12,12 @@
     "geocode:all": "bash scripts/geocode_all.sh",
     "publish:all": "bash scripts/publish_geocoded_and_dataform.sh",
     "geocode:ndjson": "node scripts/geocode_stores_ndjson.js",
-    "bq:upsert:geocoded": "node scripts/bq_upsert_geocoded.js"
+    "bq:upsert:geocoded": "node scripts/bq_upsert_geocoded.js",
+    "export:map-db": "node scripts/export_map_db.js",
+    "map:serve": "node scripts/map_dev_server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   },
   "repository": {
     "type": "git",

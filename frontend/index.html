@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RideOasis Supply Point Map</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/ol@9.2.4/ol.css"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div>
+          <h1>RideOasis Map</h1>
+          <p class="subtitle">GPX 経路の近傍にある補給地点を可視化</p>
+        </div>
+        <div class="status" id="status">GPX を読み込んでください</div>
+      </header>
+
+      <section class="panel controls">
+        <label class="file-input">
+          <span>GPX ファイル</span>
+          <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml" />
+        </label>
+
+        <label>
+          <span>近傍距離 (m)</span>
+          <input id="distance-threshold" type="number" min="100" step="100" value="1000" />
+        </label>
+
+        <label>
+          <span>最小 point_level</span>
+          <input id="min-point-level" type="number" min="1" step="1" value="8" />
+        </label>
+
+        <fieldset class="chains">
+          <legend>チェーン</legend>
+          <label><input type="checkbox" value="7eleven" checked />7-Eleven</label>
+          <label><input type="checkbox" value="lawson" checked />Lawson</label>
+          <label><input type="checkbox" value="familymart" checked />FamilyMart</label>
+          <label><input type="checkbox" value="daily_yamazaki" checked />Daily Yamazaki</label>
+          <label><input type="checkbox" value="ministop" checked />MINISTOP</label>
+          <label><input type="checkbox" value="michi_no_eki" checked />道の駅</label>
+        </fieldset>
+
+        <button id="refresh" type="button">再計算</button>
+      </section>
+
+      <section class="content">
+        <aside class="sidebar">
+          <div class="summary-card">
+            <div class="summary-label">経路点数</div>
+            <div class="summary-value" id="route-point-count">-</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">候補件数</div>
+            <div class="summary-value" id="candidate-count">-</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label">近傍件数</div>
+            <div class="summary-value" id="matched-count">-</div>
+          </div>
+          <div class="point-list" id="point-list"></div>
+        </aside>
+        <div class="map-shell">
+          <div class="map" id="map"></div>
+          <div class="popup" id="popup" hidden>
+            <button class="popup-close" id="popup-close" type="button">×</button>
+            <div class="popup-body" id="popup-body"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      window.RIDEOASIS_API_BASE = window.RIDEOASIS_API_BASE || "/api";
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/ol@9.2.4/dist/ol.js"></script>
+    <script src="./route_math.js"></script>
+    <script src="./gpx.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
