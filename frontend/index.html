@@ -15,56 +15,98 @@
       <header class="topbar">
         <div>
           <h1>RideOasis Map</h1>
-          <p class="subtitle">GPX 経路または現在地の近傍にある補給地点を可視化</p>
+          <p class="subtitle">位置と近傍距離だけ決めて、結果をあとから絞り込む</p>
         </div>
-        <div class="status" id="status">GPX か現在地を読み込んでください</div>
+        <div class="status" id="status">GPX か現在地を指定してください</div>
       </header>
 
       <section class="panel controls">
-        <label class="file-input">
-          <span>GPX ファイル</span>
-          <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml" />
-        </label>
-
-        <button id="use-current-location" type="button" class="secondary-action">現在地を使う</button>
-
-        <label>
-          <span>近傍距離 (m)</span>
-          <input id="distance-threshold" type="number" min="100" step="100" value="1000" />
-        </label>
-
-        <label>
-          <span>最小 point_level</span>
-          <input id="min-point-level" type="number" min="1" step="1" value="8" />
-        </label>
-
-        <fieldset class="chains">
-          <legend>チェーン</legend>
-          <label><input type="checkbox" value="7eleven" checked />7-Eleven</label>
-          <label><input type="checkbox" value="lawson" checked />Lawson</label>
-          <label><input type="checkbox" value="familymart" checked />FamilyMart</label>
-          <label><input type="checkbox" value="daily_yamazaki" checked />Daily Yamazaki</label>
-          <label><input type="checkbox" value="ministop" checked />MINISTOP</label>
-          <label><input type="checkbox" value="michi_no_eki" checked />道の駅</label>
+        <fieldset class="source-mode">
+          <legend>ルートの指定</legend>
+          <label><input type="radio" name="source-mode" value="gpx" checked />GPX ファイル</label>
+          <label><input type="radio" name="source-mode" value="current" />現在地</label>
         </fieldset>
 
-        <button id="refresh" type="button">再計算</button>
+        <div class="source-panel" id="gpx-panel">
+          <label class="file-picker-button" for="gpx-file">
+            GPX を選ぶ
+            <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml" />
+          </label>
+          <div class="source-meta">
+            <div class="file-name" id="gpx-file-name">未選択</div>
+            <div class="route-meta" id="route-point-count">経路点数: -</div>
+          </div>
+        </div>
+
+        <div class="source-panel" id="current-location-panel">
+          <button id="use-current-location" type="button" class="secondary-action">現在地を使う</button>
+        </div>
+
+        <fieldset class="distance-ladder">
+          <legend>近傍距離</legend>
+          <div class="distance-current" id="distance-current">1km</div>
+          <input
+            id="distance-threshold"
+            type="range"
+            min="0"
+            max="6"
+            step="1"
+            value="3"
+            list="distance-threshold-labels"
+          />
+          <datalist id="distance-threshold-labels">
+            <option value="0" label="100m"></option>
+            <option value="1" label="250m"></option>
+            <option value="2" label="500m"></option>
+            <option value="3" label="1km"></option>
+            <option value="4" label="2km"></option>
+            <option value="5" label="5km"></option>
+            <option value="6" label="10km"></option>
+          </datalist>
+          <div class="distance-scale" aria-hidden="true">
+            <span>100m</span>
+            <span>250m</span>
+            <span>500m</span>
+            <span>1km</span>
+            <span>2km</span>
+            <span>5km</span>
+            <span>10km</span>
+          </div>
+        </fieldset>
       </section>
 
       <section class="content">
         <aside class="sidebar">
-          <div class="summary-card">
-            <div class="summary-label">経路点数</div>
-            <div class="summary-value" id="route-point-count">-</div>
+          <div class="summary-row">
+            <div class="summary-card compact">
+              <div class="summary-label">候補</div>
+              <div class="summary-value" id="candidate-count">-</div>
+            </div>
+            <div class="summary-card compact">
+              <div class="summary-label">表示</div>
+              <div class="summary-value" id="matched-count">-</div>
+            </div>
           </div>
-          <div class="summary-card">
-            <div class="summary-label">候補件数</div>
-            <div class="summary-value" id="candidate-count">-</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">近傍件数</div>
-            <div class="summary-value" id="matched-count">-</div>
-          </div>
+
+          <details class="filter-panel" open>
+            <summary>絞り込み</summary>
+            <fieldset class="chains result-filters chain-filters">
+              <legend>チェーン</legend>
+              <label><input type="checkbox" value="7eleven" checked />7-Eleven</label>
+              <label><input type="checkbox" value="lawson" checked />Lawson</label>
+              <label><input type="checkbox" value="familymart" checked />FamilyMart</label>
+              <label><input type="checkbox" value="daily_yamazaki" checked />Daily Yamazaki</label>
+              <label><input type="checkbox" value="ministop" checked />MINISTOP</label>
+              <label><input type="checkbox" value="michi_no_eki" checked />道の駅</label>
+            </fieldset>
+
+            <fieldset class="chains result-filters precision-filters">
+              <legend>位置の確かさ</legend>
+              <label><input type="checkbox" name="precision-filter" value="precise" checked />正確</label>
+              <label><input type="checkbox" name="precision-filter" value="rough" checked />あいまい</label>
+            </fieldset>
+          </details>
+
           <div class="point-list" id="point-list"></div>
         </aside>
         <div class="map-shell">
