@@ -135,15 +135,27 @@ function buildPointList(points) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'point-item';
+    item.dataset.supplyPointId = String(props.supply_point_id);
     if (props.supply_point_id === activeSupplyPointId) {
       item.classList.add('active');
     }
-    item.innerHTML = [
-      `<div class="chain">${escapeHtml(props.chain)}</div>`,
-      `<div class="title">${escapeHtml(props.name)}</div>`,
-      `<div class="meta">${Math.round(props.route_distance_m)}m</div>`,
-      `<div class="address">${escapeHtml(props.address_norm || '-')}</div>`
-    ].join('');
+    const chain = document.createElement('span');
+    chain.className = 'chain';
+    chain.textContent = props.chain;
+
+    const title = document.createElement('span');
+    title.className = 'title';
+    title.textContent = props.name;
+
+    const meta = document.createElement('span');
+    meta.className = 'meta';
+    meta.textContent = `${Math.round(props.route_distance_m)}m`;
+
+    const address = document.createElement('span');
+    address.className = 'address';
+    address.textContent = props.address_norm || '-';
+
+    item.append(chain, title, meta, address);
     item.addEventListener('mouseenter', () => previewPoint(props.supply_point_id));
     item.addEventListener('mouseleave', () => clearPreviewPoint(props.supply_point_id));
     item.addEventListener('focus', () => previewPoint(props.supply_point_id));
@@ -151,6 +163,15 @@ function buildPointList(points) {
     item.addEventListener('click', () => activatePoint(props.supply_point_id));
     elements.pointList.appendChild(item);
   }
+}
+
+/** Builds the popup HTML for a selected supply point. */
+function buildPopupHtml(props) {
+  return [
+    `<div class="popup-chain">${escapeHtml(props.chain)}</div>`,
+    `<div class="popup-title">${escapeHtml(props.name)}</div>`,
+    `<div class="popup-distance">${Math.round(props.route_distance_m)}m</div>`
+  ].join('');
 }
 
 /** Escapes text before inserting it into HTML fragments. */
@@ -161,15 +182,6 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
-}
-
-/** Builds the popup HTML for a selected supply point. */
-function buildPopupHtml(props) {
-  return [
-    `<div class="popup-chain">${escapeHtml(props.chain)}</div>`,
-    `<div class="popup-title">${escapeHtml(props.name)}</div>`,
-    `<div class="popup-distance">${Math.round(props.route_distance_m)}m</div>`
-  ].join('');
 }
 
 /** Returns the currently highlighted supply point id. */
@@ -193,6 +205,13 @@ function syncPointHighlight() {
   }
 }
 
+/** Updates active styling in the side list without rebuilding focused elements. */
+function syncPointListSelection() {
+  for (const item of elements.pointList.querySelectorAll('.point-item[data-supply-point-id]')) {
+    item.classList.toggle('active', item.dataset.supplyPointId === String(activeSupplyPointId));
+  }
+}
+
 /** Opens the popup for one rendered feature. */
 function openPopupForFeature(feature) {
   popupOverlay.setPosition(feature.getGeometry().getCoordinates());
@@ -205,9 +224,9 @@ function activatePoint(supplyPointId) {
   activeSupplyPointId = supplyPointId;
   previewSupplyPointId = null;
   syncPointHighlight();
+  syncPointListSelection();
   const feature = findPointFeature(supplyPointId);
   if (feature) openPopupForFeature(feature);
-  buildPointList(matchedPoints);
 }
 
 /** Temporarily previews one supply point from the side list. */
@@ -239,7 +258,7 @@ function clearPopup() {
   elements.popup.hidden = true;
   popupOverlay.setPosition(undefined);
   syncPointHighlight();
-  buildPointList(matchedPoints);
+  syncPointListSelection();
 }
 
 /** Updates summary cards for route points, candidates, and matches. */
