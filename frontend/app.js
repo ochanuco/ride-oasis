@@ -104,6 +104,7 @@ let routeFeature = null;
 let routeCoordinates = [];
 let matchedPoints = [];
 let activeSupplyPointId = null;
+let previewSupplyPointId = null;
 const API_PAGE_LIMIT = 10000;
 
 /** Updates the top-right status badge. */
@@ -138,10 +139,15 @@ function buildPointList(points) {
       item.classList.add('active');
     }
     item.innerHTML = [
+      `<div class="chain">${escapeHtml(props.chain)}</div>`,
       `<div class="title">${escapeHtml(props.name)}</div>`,
-      `<div class="meta">${escapeHtml(props.chain)} · ${Math.round(props.route_distance_m)}m</div>`,
-      `<div class="meta">${escapeHtml(props.address_norm || '-')}</div>`
+      `<div class="meta">${Math.round(props.route_distance_m)}m</div>`,
+      `<div class="address">${escapeHtml(props.address_norm || '-')}</div>`
     ].join('');
+    item.addEventListener('mouseenter', () => previewPoint(props.supply_point_id));
+    item.addEventListener('mouseleave', () => clearPreviewPoint(props.supply_point_id));
+    item.addEventListener('focus', () => previewPoint(props.supply_point_id));
+    item.addEventListener('blur', () => clearPreviewPoint(props.supply_point_id));
     item.addEventListener('click', () => activatePoint(props.supply_point_id));
     elements.pointList.appendChild(item);
   }
@@ -157,60 +163,82 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-/** Allows only http/https URLs for outbound source links shown in the popup. */
-function safeExternalUrl(value) {
-  if (!value) return null;
-  try {
-    const url = new URL(String(value));
-    if (url.protocol === 'http:' || url.protocol === 'https:') {
-      return url.toString();
-    }
-    return null;
-  } catch {
-    return null;
+/** Builds the popup HTML for a selected supply point. */
+function buildPopupHtml(props) {
+  return [
+    `<div class="popup-chain">${escapeHtml(props.chain)}</div>`,
+    `<div class="popup-title">${escapeHtml(props.name)}</div>`,
+    `<div class="popup-distance">${Math.round(props.route_distance_m)}m</div>`
+  ].join('');
+}
+
+/** Returns the currently highlighted supply point id. */
+function highlightedSupplyPointId() {
+  return previewSupplyPointId ?? activeSupplyPointId;
+}
+
+/** Finds the rendered feature for a supply point id. */
+function findPointFeature(supplyPointId) {
+  return (
+    pointSource.getFeatures().find((feature) => feature.get('properties').supply_point_id === supplyPointId) ||
+    null
+  );
+}
+
+/** Updates marker highlight state from current active or preview selection. */
+function syncPointHighlight() {
+  const highlightedId = highlightedSupplyPointId();
+  for (const feature of pointSource.getFeatures()) {
+    feature.set('active', feature.get('properties').supply_point_id === highlightedId);
   }
 }
 
-/** Builds the popup HTML for a selected supply point. */
-function buildPopupHtml(props) {
-  const safeUrl = safeExternalUrl(props.source_url);
-  const link = safeUrl
-    ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noreferrer">source</a>`
-    : '-';
-  return [
-    `<strong>${escapeHtml(props.name)}</strong>`,
-    `<div>chain: ${escapeHtml(props.chain)}</div>`,
-    `<div>distance: ${Math.round(props.route_distance_m)}m</div>`,
-    `<div>point_level: ${escapeHtml(props.geocode_point_level ?? '-')}</div>`,
-    `<div>updated_at: ${escapeHtml(props.updated_at || '-')}</div>`,
-    `<div>${escapeHtml(props.address_norm || '-')}</div>`,
-    `<div>${link}</div>`
-  ].join('');
+/** Opens the popup for one rendered feature. */
+function openPopupForFeature(feature) {
+  popupOverlay.setPosition(feature.getGeometry().getCoordinates());
+  elements.popupBody.innerHTML = buildPopupHtml(feature.get('properties'));
+  elements.popup.hidden = false;
 }
 
 /** Marks one supply point active and opens its popup. */
 function activatePoint(supplyPointId) {
   activeSupplyPointId = supplyPointId;
-  for (const feature of pointSource.getFeatures()) {
-    const isActive = feature.get('properties').supply_point_id === supplyPointId;
-    feature.set('active', isActive);
-    if (isActive) {
-      popupOverlay.setPosition(feature.getGeometry().getCoordinates());
-      elements.popupBody.innerHTML = buildPopupHtml(feature.get('properties'));
-      elements.popup.hidden = false;
-    }
-  }
+  previewSupplyPointId = null;
+  syncPointHighlight();
+  const feature = findPointFeature(supplyPointId);
+  if (feature) openPopupForFeature(feature);
   buildPointList(matchedPoints);
+}
+
+/** Temporarily previews one supply point from the side list. */
+function previewPoint(supplyPointId) {
+  previewSupplyPointId = supplyPointId;
+  syncPointHighlight();
+  const feature = findPointFeature(supplyPointId);
+  if (feature) openPopupForFeature(feature);
+}
+
+/** Clears one temporary preview and restores the active popup if present. */
+function clearPreviewPoint(supplyPointId) {
+  if (previewSupplyPointId !== supplyPointId) return;
+  previewSupplyPointId = null;
+  syncPointHighlight();
+  const activeFeature = activeSupplyPointId ? findPointFeature(activeSupplyPointId) : null;
+  if (activeFeature) {
+    openPopupForFeature(activeFeature);
+    return;
+  }
+  elements.popup.hidden = true;
+  popupOverlay.setPosition(undefined);
 }
 
 /** Clears popup and active marker state. */
 function clearPopup() {
   activeSupplyPointId = null;
+  previewSupplyPointId = null;
   elements.popup.hidden = true;
   popupOverlay.setPosition(undefined);
-  for (const feature of pointSource.getFeatures()) {
-    feature.set('active', false);
-  }
+  syncPointHighlight();
   buildPointList(matchedPoints);
 }
 
@@ -262,7 +290,7 @@ function renderMatchedPoints(points) {
       geometry: new ol.geom.Point(ol.proj.fromLonLat(feature.geometry.coordinates))
     });
     olFeature.set('properties', feature.properties);
-    olFeature.set('active', feature.properties.supply_point_id === activeSupplyPointId);
+    olFeature.set('active', feature.properties.supply_point_id === highlightedSupplyPointId());
     return olFeature;
   });
   pointSource.addFeatures(features);
