@@ -8,6 +8,7 @@
 - コア対象: セブン‐イレブン / ローソン / ファミリーマートの店舗情報を収集
 - 住所を正規化し、緯度経度を付与
 - BigQuery 上で最新化・重複排除し `mart.rideoasis_supply_points` を提供
+- 補給地点を GPX 経路や現在地の近傍で確認できるローカル WebUI を提供
 
 ## 実装済みクローラ
 
@@ -17,40 +18,6 @@
 - Daily Yamazaki
 - 道の駅
 - MINISTOP
-
-## アーキテクチャ
-
-- Cloud Run（Job/Service）
-- Codex + Playwright によるクロール/抽出
-- `@geolonia/normalize-japanese-addresses` による住所正規化/座標付与
-- Dataform による BigQuery 内の整形・履歴・マート化
-- Terraform による IaC
-
-## データフロー
-
-1. Cloud Run が店舗情報を取得し `raw.stores_scraped_*` に投入
-2. Cloud Run が `normalize()` を実行し `raw.stores_geocoded` に投入
-3. Dataform が `raw` を最新化/重複排除して `stg.*` を生成
-4. Dataform が `mart.rideoasis_supply_points` を生成
-5. Dataform が `ops.*` を生成（未解決・品質）
-
-## BigQuery スキーマ（要約）
-
-- `raw.stores_scraped_{chain}`: クローラ出力（チェーン別）
-- `raw.stores_geocoded`: 正規化済み住所 + 座標（共通）
-- `stg.*`: 最新化・整形
-- `mart.rideoasis_supply_points`: 供給点マート
-- `ops.*`: 未解決・品質監視
-
-未実装の運用・配備項目は GitHub Issues を参照してください。
-
-## ディレクトリ（予定）
-
-- `apps/`: Cloud Run ジョブ/サービス
-- `dataform/`: Dataform 定義
-- `frontend/`: 補給地点マップの静的 UI
-- `terraform/`: IaC
-- `skills/`: 本リポジトリ用の作業スキル
 
 ## 使い方（取得）
 
@@ -69,6 +36,14 @@ npm run crawl:all
 npm run geocode:all
 npm run publish:all
 ```
+
+補足:
+
+- 都道府県はローマ字指定です
+- 全都道府県を回すときは `--pref all` を使えます
+- 利用可能な指定値は `--pref-list` で確認できます
+
+## 使い方（住所正規化）
 
 ローカルの住所データを使って geocode する場合（例）:
 
@@ -131,7 +106,7 @@ npm run bq:upsert:geocoded -- \
 - 取得元データに存在しない場合、`detail_url` は出力しません
 - `bq:upsert:geocoded` は `schemas/raw/stores_geocoded.json` を使って一時テーブルへロードし、`chain + store_id` 単位で最新 `geocoded_at` を残す Upsert を行います
 
-## 補給地点マップ（ローカルMVP）
+## 使い方（補給地点マップ）
 
 `mart.rideoasis_supply_points` をローカル `sqlite` にエクスポートし、GPX 経路の近傍にある補給地点を OpenLayers で確認できます。
 
@@ -151,27 +126,8 @@ npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787
 
 3. ブラウザで `http://localhost:8787` を開き、GPX ファイルを選ぶ
 
-MVP の仕様:
-
-- API は `GET /api/supply-points` を返します
-- サーバ側では `bbox` / `chains` / `min_point_level` / `limit` で絞り込みます
-- 経路からの最短距離判定はブラウザ側で行います
-- 近傍距離はメートルで調整できます
-- `node:sqlite` を使うため、ローカル実行は Node.js `>=22.5.0` 前提です
 
 ## 注意事項
 
 - クローリング対象サイトの利用規約/robots を確認し、アクセス頻度を制限します。
 - `raw.stores_scraped_*` の詳細スキーマはクロール実装に合わせて確定します。
-
-## point_level 閾値メモ
-
-- `point_level` の閾値を下げると、未解決件数は減り、成功率は上がります。
-- ただし実世界の座標精度は下がりやすく、地図上のズレが増える可能性があります。
-- KPI改善（成功率上昇）は、必ずしも品質改善を意味しません。
-
-運用では次をセットで確認します。
-
-- `strict_success_rate`（`point_level >= 閾値` を満たす成功率）
-- `point_level` 分布（1 / 2 / 3 / 8 / null）
-- `unresolved_rows`（未解決件数）
