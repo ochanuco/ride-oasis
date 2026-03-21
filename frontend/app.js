@@ -1,15 +1,20 @@
 const API_BASE = window.RIDEOASIS_API_BASE || '/api';
 
+const PRECISE_POINT_LEVEL = 8;
+const DEFAULT_MIN_POINT_LEVEL = 3;
+const DISTANCE_OPTIONS = [100, 250, 500, 1000, 2000, 5000, 10000];
+
 const elements = {
   status: document.getElementById('status'),
   gpxFile: document.getElementById('gpx-file'),
   useCurrentLocation: document.getElementById('use-current-location'),
-  distanceThreshold: document.getElementById('distance-threshold'),
-  minPointLevel: document.getElementById('min-point-level'),
-  refresh: document.getElementById('refresh'),
-  pointList: document.getElementById('point-list'),
+  gpxPanel: document.getElementById('gpx-panel'),
+  currentLocationPanel: document.getElementById('current-location-panel'),
+  gpxFileName: document.getElementById('gpx-file-name'),
   routePointCount: document.getElementById('route-point-count'),
-  candidateCount: document.getElementById('candidate-count'),
+  distanceThreshold: document.getElementById('distance-threshold'),
+  distanceCurrent: document.getElementById('distance-current'),
+  pointList: document.getElementById('point-list'),
   matchedCount: document.getElementById('matched-count'),
   popup: document.getElementById('popup'),
   popupBody: document.getElementById('popup-body'),
@@ -102,21 +107,91 @@ map.addOverlay(popupOverlay);
 
 let routeFeature = null;
 let routeCoordinates = [];
-let matchedPoints = [];
+let allMatchedPoints = [];
+let filteredPoints = [];
 let activeSupplyPointId = null;
 let previewSupplyPointId = null;
 const API_PAGE_LIMIT = 10000;
+const featureIndex = new Map();
+let latestRouteLoadToken = 0;
+let latestRefreshToken = 0;
+
+/** Returns the currently selected route source mode. */
+function selectedSourceMode() {
+  return document.querySelector('input[name="source-mode"]:checked')?.value || 'gpx';
+}
+
+/** Formats a distance for compact UI labels. */
+function formatDistance(distanceMeters) {
+  return distanceMeters >= 1000 ? `${distanceMeters / 1000}km` : `${distanceMeters}m`;
+}
+
+/** Returns the selected ladder distance in meters. */
+function selectedDistanceMeters() {
+  const index = Number(elements.distanceThreshold.value);
+  return DISTANCE_OPTIONS[index] ?? 1000;
+}
+
+/** Syncs the visible distance label beside the ladder. */
+function syncDistanceUi() {
+  const distanceText = formatDistance(selectedDistanceMeters());
+  elements.distanceCurrent.textContent = distanceText;
+  elements.distanceThreshold.setAttribute('aria-valuetext', `${distanceText}以内`);
+}
+
+/** Returns the currently enabled chain filters from the result toolbar. */
+function selectedResultChains() {
+  return Array.from(document.querySelectorAll('.chain-filters input[type="checkbox"]:checked')).map(
+    (input) => input.value
+  );
+}
+
+/** Returns the active precision filters for result narrowing. */
+function selectedPrecisionFilters() {
+  return new Set(
+    Array.from(document.querySelectorAll('input[name="precision-filter"]:checked')).map((input) => input.value)
+  );
+}
+
+/** Maps point level to a UI-friendly precision label. */
+function precisionLabel(pointLevel) {
+  return Number(pointLevel) >= PRECISE_POINT_LEVEL ? '正確' : 'あいまい';
+}
 
 /** Updates the top-right status badge. */
 function setStatus(message) {
   elements.status.textContent = message;
 }
 
-/** Returns the currently enabled chain filters from the UI. */
-function selectedChains() {
-  return Array.from(document.querySelectorAll('.chains input[type="checkbox"]:checked')).map(
-    (input) => input.value
-  );
+/** Syncs source-mode panel state so only one input path is active at a time. */
+function syncSourceModeUi() {
+  const gpxActive = selectedSourceMode() === 'gpx';
+  elements.gpxFile.disabled = !gpxActive;
+  elements.useCurrentLocation.disabled = gpxActive;
+  elements.gpxPanel.classList.toggle('inactive', !gpxActive);
+  elements.currentLocationPanel.classList.toggle('inactive', gpxActive);
+}
+
+/** Resets visible and cached result points before a new search. */
+function resetResults() {
+  allMatchedPoints = [];
+  filteredPoints = [];
+  featureIndex.clear();
+  pointSource.clear();
+  buildPointList([]);
+  updateSummary(0);
+  clearPopup();
+}
+
+/** Updates route-point count near the route input controls. */
+function updateRoutePointCount() {
+  const count = routeCoordinates.length;
+  elements.routePointCount.textContent = `経路点数: ${count > 0 ? count : '-'}`;
+}
+
+/** Invalidates in-flight candidate refreshes after route source changes. */
+function cancelPendingRefreshes() {
+  latestRefreshToken += 1;
 }
 
 /** Renders the matched supply point list beside the map. */
@@ -125,7 +200,7 @@ function buildPointList(points) {
   if (points.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'point-item';
-    empty.textContent = '近傍の補給地点は見つかりませんでした';
+    empty.textContent = '該当する補給地点はありません';
     elements.pointList.appendChild(empty);
     return;
   }
@@ -136,7 +211,7 @@ function buildPointList(points) {
     item.type = 'button';
     item.className = 'point-item';
     item.dataset.supplyPointId = String(props.supply_point_id);
-    if (props.supply_point_id === activeSupplyPointId) {
+    if (supplyPointKey(props.supply_point_id) === supplyPointKey(activeSupplyPointId)) {
       item.classList.add('active');
     }
     const chain = document.createElement('span');
@@ -149,18 +224,13 @@ function buildPointList(points) {
 
     const meta = document.createElement('span');
     meta.className = 'meta';
-    meta.textContent = `${Math.round(props.route_distance_m)}m`;
+    meta.textContent = `${Math.round(props.route_distance_m)}m ・ ${precisionLabel(props.geocode_point_level)}`;
 
     const address = document.createElement('span');
     address.className = 'address';
     address.textContent = props.address_norm || '-';
 
     item.append(chain, title, meta, address);
-    item.addEventListener('mouseenter', () => previewPoint(props.supply_point_id));
-    item.addEventListener('mouseleave', () => clearPreviewPoint(props.supply_point_id));
-    item.addEventListener('focus', () => previewPoint(props.supply_point_id));
-    item.addEventListener('blur', () => clearPreviewPoint(props.supply_point_id));
-    item.addEventListener('click', () => activatePoint(props.supply_point_id));
     elements.pointList.appendChild(item);
   }
 }
@@ -170,7 +240,7 @@ function buildPopupHtml(props) {
   return [
     `<div class="popup-chain">${escapeHtml(props.chain)}</div>`,
     `<div class="popup-title">${escapeHtml(props.name)}</div>`,
-    `<div class="popup-distance">${Math.round(props.route_distance_m)}m</div>`
+    `<div class="popup-distance">${Math.round(props.route_distance_m)}m ・ ${escapeHtml(precisionLabel(props.geocode_point_level))}</div>`
   ].join('');
 }
 
@@ -189,26 +259,28 @@ function highlightedSupplyPointId() {
   return previewSupplyPointId ?? activeSupplyPointId;
 }
 
+/** Normalizes supply point ids for DOM and feature lookup. */
+function supplyPointKey(supplyPointId) {
+  return supplyPointId == null ? '' : String(supplyPointId);
+}
+
 /** Finds the rendered feature for a supply point id. */
 function findPointFeature(supplyPointId) {
-  return (
-    pointSource.getFeatures().find((feature) => feature.get('properties').supply_point_id === supplyPointId) ||
-    null
-  );
+  return featureIndex.get(supplyPointKey(supplyPointId)) || null;
 }
 
 /** Updates marker highlight state from current active or preview selection. */
 function syncPointHighlight() {
   const highlightedId = highlightedSupplyPointId();
   for (const feature of pointSource.getFeatures()) {
-    feature.set('active', feature.get('properties').supply_point_id === highlightedId);
+    feature.set('active', supplyPointKey(feature.get('properties').supply_point_id) === supplyPointKey(highlightedId));
   }
 }
 
 /** Updates active styling in the side list without rebuilding focused elements. */
 function syncPointListSelection() {
   for (const item of elements.pointList.querySelectorAll('.point-item[data-supply-point-id]')) {
-    item.classList.toggle('active', item.dataset.supplyPointId === String(activeSupplyPointId));
+    item.classList.toggle('active', item.dataset.supplyPointId === supplyPointKey(activeSupplyPointId));
   }
 }
 
@@ -221,7 +293,7 @@ function openPopupForFeature(feature) {
 
 /** Marks one supply point active and opens its popup. */
 function activatePoint(supplyPointId) {
-  activeSupplyPointId = supplyPointId;
+  activeSupplyPointId = supplyPointKey(supplyPointId);
   previewSupplyPointId = null;
   syncPointHighlight();
   syncPointListSelection();
@@ -231,7 +303,7 @@ function activatePoint(supplyPointId) {
 
 /** Temporarily previews one supply point from the side list. */
 function previewPoint(supplyPointId) {
-  previewSupplyPointId = supplyPointId;
+  previewSupplyPointId = supplyPointKey(supplyPointId);
   syncPointHighlight();
   const feature = findPointFeature(supplyPointId);
   if (feature) openPopupForFeature(feature);
@@ -239,7 +311,7 @@ function previewPoint(supplyPointId) {
 
 /** Clears one temporary preview and restores the active popup if present. */
 function clearPreviewPoint(supplyPointId) {
-  if (previewSupplyPointId !== supplyPointId) return;
+  if (previewSupplyPointId !== supplyPointKey(supplyPointId)) return;
   previewSupplyPointId = null;
   syncPointHighlight();
   const activeFeature = activeSupplyPointId ? findPointFeature(activeSupplyPointId) : null;
@@ -261,11 +333,9 @@ function clearPopup() {
   syncPointListSelection();
 }
 
-/** Updates summary cards for route points, candidates, and matches. */
-function updateSummary(candidateCount, matchedCount) {
-  elements.routePointCount.textContent = routeCoordinates.length ? String(routeCoordinates.length) : '-';
-  elements.candidateCount.textContent = String(candidateCount);
-  elements.matchedCount.textContent = String(matchedCount);
+/** Updates summary card for visible results. */
+function updateSummary(visibleCount) {
+  elements.matchedCount.textContent = String(visibleCount);
 }
 
 /** Renders the uploaded route and its start/end markers. */
@@ -277,13 +347,9 @@ function renderRoute(feature) {
 
   const coordinates = feature.getGeometry().getCoordinates();
   if (coordinates.length >= 2) {
-    const start = new ol.Feature({
-      geometry: new ol.geom.Point(coordinates[0])
-    });
+    const start = new ol.Feature({ geometry: new ol.geom.Point(coordinates[0]) });
     start.set('kind', 'start');
-    const goal = new ol.Feature({
-      geometry: new ol.geom.Point(coordinates[coordinates.length - 1])
-    });
+    const goal = new ol.Feature({ geometry: new ol.geom.Point(coordinates[coordinates.length - 1]) });
     goal.set('kind', 'goal');
     endpointSource.addFeatures([start, goal]);
   }
@@ -303,16 +369,24 @@ function renderCurrentLocation(coord) {
 
 /** Converts matched GeoJSON points into OpenLayers features. */
 function renderMatchedPoints(points) {
+  featureIndex.clear();
   pointSource.clear();
   const features = points.map((feature) => {
     const olFeature = new ol.Feature({
       geometry: new ol.geom.Point(ol.proj.fromLonLat(feature.geometry.coordinates))
     });
     olFeature.set('properties', feature.properties);
-    olFeature.set('active', feature.properties.supply_point_id === highlightedSupplyPointId());
+    const featureKey = supplyPointKey(feature.properties.supply_point_id);
+    olFeature.set('active', featureKey === supplyPointKey(highlightedSupplyPointId()));
+    featureIndex.set(featureKey, olFeature);
     return olFeature;
   });
   pointSource.addFeatures(features);
+}
+
+/** Finds the result-list item button from a delegated event target. */
+function findPointListItem(node) {
+  return node instanceof Element ? node.closest('.point-item[data-supply-point-id]') : null;
 }
 
 /** Fits the map view to the currently visible route and points. */
@@ -334,21 +408,21 @@ function fitToVisibleData() {
 /** Parses GPX text and converts it into an OpenLayers route feature. */
 function createRouteFeatureFromGpx(gpxText) {
   const parsed = window.GpxParser.parseGpxText(gpxText);
-  routeCoordinates = parsed.geometry.coordinates;
-  return routeGeoJsonFormat.readFeature(parsed);
+  return {
+    coordinates: parsed.geometry.coordinates,
+    feature: routeGeoJsonFormat.readFeature(parsed)
+  };
 }
 
 /** Expands the route bbox so the API can return nearby candidate points. */
-function expandedBboxForQuery(distanceMeters) {
-  const routeBbox = window.RouteMath.computeBbox(routeCoordinates);
+function expandedBboxForQuery(routeSnapshot, distanceMeters) {
+  const routeBbox = window.RouteMath.computeBbox(routeSnapshot);
   return window.RouteMath.expandBbox(routeBbox, Math.max(distanceMeters, 2000));
 }
 
 /** Loads candidate supply points from the local API for the current filters. */
-async function fetchCandidatePoints(distanceMeters) {
-  const chains = selectedChains();
-  const minPointLevel = Number(elements.minPointLevel.value) || 8;
-  const bbox = expandedBboxForQuery(distanceMeters);
+async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
+  const bbox = expandedBboxForQuery(routeSnapshot, distanceMeters);
   const features = [];
   const seenIds = new Set();
   let offset = 0;
@@ -358,8 +432,7 @@ async function fetchCandidatePoints(distanceMeters) {
     if (bbox) {
       params.set('bbox', bbox.join(','));
     }
-    params.set('chains', chains.length > 0 ? chains.join(',') : '');
-    params.set('min_point_level', String(minPointLevel));
+    params.set('min_point_level', String(DEFAULT_MIN_POINT_LEVEL));
     params.set('limit', String(API_PAGE_LIMIT));
     params.set('offset', String(offset));
 
@@ -388,12 +461,12 @@ async function fetchCandidatePoints(distanceMeters) {
 }
 
 /** Applies the browser-side point-to-route distance filter. */
-function filterMatchedPoints(featureCollection, distanceMeters) {
-  const origin = routeCoordinates[0] || null;
+function filterMatchedPoints(featureCollection, routeSnapshot, distanceMeters) {
+  const origin = routeSnapshot[0] || null;
   return featureCollection.features
     .map((feature) => {
-      const distance = routeCoordinates.length >= 2
-        ? window.RouteMath.pointToRouteDistanceMeters(feature.geometry.coordinates, routeCoordinates)
+      const distance = routeSnapshot.length >= 2
+        ? window.RouteMath.pointToRouteDistanceMeters(feature.geometry.coordinates, routeSnapshot)
         : window.RouteMath.pointToPointDistanceMeters(feature.geometry.coordinates, origin);
       return {
         ...feature,
@@ -407,44 +480,92 @@ function filterMatchedPoints(featureCollection, distanceMeters) {
     .sort((a, b) => a.properties.route_distance_m - b.properties.route_distance_m);
 }
 
+/** Applies result-screen chain and precision filters without requerying the API. */
+function applyResultFilters() {
+  const chains = new Set(selectedResultChains());
+  const precisionFilters = selectedPrecisionFilters();
+  const activeId = activeSupplyPointId;
+  const previewId = previewSupplyPointId;
+  filteredPoints = allMatchedPoints.filter((feature) => {
+    const chainMatched = chains.has(feature.properties.chain);
+    const precisionMatched = precisionFilters.has(
+      Number(feature.properties.geocode_point_level) >= PRECISE_POINT_LEVEL ? 'precise' : 'rough'
+    );
+    return chainMatched && precisionMatched;
+  });
+  const visibleIds = new Set(filteredPoints.map((feature) => supplyPointKey(feature.properties.supply_point_id)));
+  if (activeId && !visibleIds.has(activeId)) {
+    activeSupplyPointId = null;
+  }
+  if (previewId && !visibleIds.has(previewId)) {
+    previewSupplyPointId = null;
+  }
+  renderMatchedPoints(filteredPoints);
+  buildPointList(filteredPoints);
+  syncPointHighlight();
+  syncPointListSelection();
+  const highlightedId = highlightedSupplyPointId();
+  const highlightedFeature = highlightedId ? findPointFeature(highlightedId) : null;
+  if (highlightedFeature) {
+    openPopupForFeature(highlightedFeature);
+  } else {
+    elements.popup.hidden = true;
+    popupOverlay.setPosition(undefined);
+  }
+  updateSummary(filteredPoints.length);
+  fitToVisibleData();
+  setStatus(`${filteredPoints.length} 件を表示中`);
+}
+
 /** Refreshes API candidates and matched points for the loaded route. */
-async function refreshMap() {
-  if (!routeCoordinates.length) {
-    setStatus('先に GPX か現在地を読み込んでください');
+async function refreshMap(routeSnapshot = [...routeCoordinates]) {
+  if (!routeSnapshot.length) {
+    setStatus('先に GPX か現在地を指定してください');
     return;
   }
 
   clearPopup();
-  const distanceMeters = Math.max(100, Number(elements.distanceThreshold.value) || 1000);
+  const distanceMeters = selectedDistanceMeters();
+  const refreshToken = ++latestRefreshToken;
   setStatus('補給地点を検索中...');
 
   try {
-    const candidates = await fetchCandidatePoints(distanceMeters);
-    matchedPoints = filterMatchedPoints(candidates, distanceMeters);
-    renderMatchedPoints(matchedPoints);
-    buildPointList(matchedPoints);
-    updateSummary(candidates.features.length, matchedPoints.length);
-    fitToVisibleData();
-    setStatus(`${matchedPoints.length} 件の補給地点が ${distanceMeters}m 以内にあります`);
+    const candidates = await fetchCandidatePoints(routeSnapshot, distanceMeters);
+    if (refreshToken !== latestRefreshToken) return;
+    allMatchedPoints = filterMatchedPoints(candidates, routeSnapshot, distanceMeters);
+    if (refreshToken !== latestRefreshToken) return;
+    applyResultFilters();
   } catch (error) {
+    if (refreshToken !== latestRefreshToken) return;
     setStatus('補給地点の取得に失敗しました');
     console.error(error);
   }
 }
 
-/** Reads the selected GPX file and triggers the initial map render. */
+/** Reads the selected GPX file and refreshes the map candidates. */
 async function handleGpxFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  const previousFileName = elements.gpxFileName.textContent;
   try {
     const gpxText = await file.text();
-    routeFeature = createRouteFeatureFromGpx(gpxText);
+    if (loadToken !== latestRouteLoadToken) return;
+    const parsedRoute = createRouteFeatureFromGpx(gpxText);
+    if (loadToken !== latestRouteLoadToken) return;
+    routeFeature = parsedRoute.feature;
+    routeCoordinates = parsedRoute.coordinates;
+    elements.gpxFileName.textContent = file.name;
     renderRoute(routeFeature);
-    updateSummary(0, 0);
+    resetResults();
+    updateRoutePointCount();
     fitToVisibleData();
     setStatus(`GPX を読み込みました: ${file.name}`);
-    await refreshMap();
+    await refreshMap([...routeCoordinates]);
   } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
+    elements.gpxFileName.textContent = previousFileName;
     setStatus(error?.message || 'GPX の読み込みに失敗しました');
     console.error(error);
   }
@@ -457,6 +578,8 @@ async function handleCurrentLocation() {
     return;
   }
 
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
   setStatus('現在地を取得中...');
   try {
     const position = await new Promise((resolve, reject) => {
@@ -466,15 +589,18 @@ async function handleCurrentLocation() {
         maximumAge: 60000
       });
     });
+    if (loadToken !== latestRouteLoadToken) return;
     const coord = [position.coords.longitude, position.coords.latitude];
     routeFeature = null;
     routeCoordinates = [coord];
     renderCurrentLocation(coord);
-    updateSummary(0, 0);
+    resetResults();
+    updateRoutePointCount();
     fitToVisibleData();
     setStatus('現在地を取得しました');
-    await refreshMap();
+    await refreshMap([...routeCoordinates]);
   } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
     const message = error?.code === 1
       ? '位置情報の利用が許可されていません'
       : error?.code === 3
@@ -487,9 +613,46 @@ async function handleCurrentLocation() {
 
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
+  for (const input of document.querySelectorAll('input[name="source-mode"]')) {
+    input.addEventListener('change', syncSourceModeUi);
+  }
+  elements.distanceThreshold.addEventListener('input', syncDistanceUi);
+  elements.distanceThreshold.addEventListener('change', () => {
+    syncDistanceUi();
+    if (routeCoordinates.length) {
+      refreshMap();
+    }
+  });
+  for (const input of document.querySelectorAll('.result-filters input[type="checkbox"]')) {
+    input.addEventListener('change', applyResultFilters);
+  }
   elements.gpxFile.addEventListener('change', handleGpxFile);
-  elements.useCurrentLocation?.addEventListener('click', handleCurrentLocation);
-  elements.refresh?.addEventListener('click', refreshMap);
+  elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
+  elements.pointList.addEventListener('mouseover', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item || item === findPointListItem(event.relatedTarget)) return;
+    previewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('mouseout', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item || item === findPointListItem(event.relatedTarget)) return;
+    clearPreviewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('focusin', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item) return;
+    previewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('focusout', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item || item === findPointListItem(event.relatedTarget)) return;
+    clearPreviewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('click', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item) return;
+    activatePoint(item.dataset.supplyPointId);
+  });
   elements.popupClose.addEventListener('click', clearPopup);
   map.on('singleclick', (event) => {
     const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
@@ -501,4 +664,9 @@ function bindEvents() {
   });
 }
 
+syncSourceModeUi();
+updateRoutePointCount();
+syncDistanceUi();
+buildPointList([]);
+updateSummary(0);
 bindEvents();
