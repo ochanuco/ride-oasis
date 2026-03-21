@@ -112,6 +112,15 @@ body {
   background: var(--accent-deep);
 }
 
+.controls .secondary-action {
+  background: #fff;
+  color: var(--accent-deep);
+}
+
+.controls .secondary-action:hover {
+  background: #fbf3e8;
+}
+
 .chains {
   display: grid;
   grid-template-columns: repeat(2, minmax(110px, 1fr));

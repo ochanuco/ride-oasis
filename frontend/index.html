@@ -15,9 +15,9 @@
       <header class="topbar">
         <div>
           <h1>RideOasis Map</h1>
-          <p class="subtitle">GPX 経路の近傍にある補給地点を可視化</p>
+          <p class="subtitle">GPX 経路または現在地の近傍にある補給地点を可視化</p>
         </div>
-        <div class="status" id="status">GPX を読み込んでください</div>
+        <div class="status" id="status">GPX か現在地を読み込んでください</div>
       </header>
 
       <section class="panel controls">
@@ -25,6 +25,8 @@
           <span>GPX ファイル</span>
           <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml" />
         </label>
+
+        <button id="use-current-location" type="button" class="secondary-action">現在地を使う</button>
 
         <label>
           <span>近傍距離 (m)</span>
