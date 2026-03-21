@@ -204,6 +204,12 @@ body {
   color: var(--ink);
 }
 
+.distance-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+}
+
 .distance-ladder input[type="range"] {
   width: 100%;
   margin: 2px 0 0;
@@ -267,30 +273,6 @@ input:disabled {
   min-height: 640px;
 }
 
-.summary-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.summary-card {
-  border: 1px solid var(--line);
-  background: var(--panel-muted);
-  padding: 10px 12px;
-}
-
-.summary-label {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.summary-value {
-  margin-top: 2px;
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
 .filter-panel {
   border: 1px solid var(--line);
   background: var(--panel-muted);
@@ -303,6 +285,10 @@ input:disabled {
   font-weight: 700;
   color: var(--ink);
   list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .filter-panel summary::-webkit-details-marker {
@@ -318,6 +304,17 @@ input:disabled {
 
 .filter-panel[open] summary::after {
   content: "閉じる";
+}
+
+.filter-summary-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.filter-summary-count span {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .filter-panel .chains {

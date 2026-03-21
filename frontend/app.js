@@ -15,7 +15,6 @@ const elements = {
   distanceThreshold: document.getElementById('distance-threshold'),
   distanceCurrent: document.getElementById('distance-current'),
   pointList: document.getElementById('point-list'),
-  candidateCount: document.getElementById('candidate-count'),
   matchedCount: document.getElementById('matched-count'),
   popup: document.getElementById('popup'),
   popupBody: document.getElementById('popup-body'),
@@ -329,9 +328,8 @@ function clearPopup() {
   syncPointListSelection();
 }
 
-/** Updates summary cards for API candidates and visible results. */
-function updateSummary(candidateCount, visibleCount) {
-  elements.candidateCount.textContent = String(candidateCount);
+/** Updates summary card for visible results. */
+function updateSummary(_candidateCount, visibleCount) {
   elements.matchedCount.textContent = String(visibleCount);
 }
 

@@ -44,7 +44,9 @@
 
         <fieldset class="distance-ladder">
           <legend>近傍距離</legend>
-          <div class="distance-current" id="distance-current">1km</div>
+          <div class="distance-header">
+            <div class="distance-current" id="distance-current">1km</div>
+          </div>
           <input
             id="distance-threshold"
             type="range"
@@ -77,19 +79,8 @@
 
       <section class="content">
         <aside class="sidebar">
-          <div class="summary-row">
-            <div class="summary-card compact">
-              <div class="summary-label">候補</div>
-              <div class="summary-value" id="candidate-count">-</div>
-            </div>
-            <div class="summary-card compact">
-              <div class="summary-label">表示</div>
-              <div class="summary-value" id="matched-count">-</div>
-            </div>
-          </div>
-
-          <details class="filter-panel" open>
-            <summary>絞り込み</summary>
+          <details class="filter-panel">
+            <summary>絞り込み <span class="filter-summary-count">表示 <span id="matched-count">-</span></span></summary>
             <fieldset class="chains result-filters chain-filters">
               <legend>チェーン</legend>
               <label><input type="checkbox" value="7eleven" checked />7-Eleven</label>
