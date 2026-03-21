@@ -112,6 +112,7 @@ let filteredPoints = [];
 let activeSupplyPointId = null;
 let previewSupplyPointId = null;
 const API_PAGE_LIMIT = 10000;
+const featureIndex = new Map();
 
 /** Returns the currently selected route source mode. */
 function selectedSourceMode() {
@@ -173,6 +174,7 @@ function syncSourceModeUi() {
 function resetResults() {
   allMatchedPoints = [];
   filteredPoints = [];
+  featureIndex.clear();
   pointSource.clear();
   buildPointList([]);
   updateSummary(0);
@@ -202,10 +204,9 @@ function buildPointList(points) {
     item.type = 'button';
     item.className = 'point-item';
     item.dataset.supplyPointId = String(props.supply_point_id);
-    if (props.supply_point_id === activeSupplyPointId) {
+    if (supplyPointKey(props.supply_point_id) === supplyPointKey(activeSupplyPointId)) {
       item.classList.add('active');
     }
-
     const chain = document.createElement('span');
     chain.className = 'chain';
     chain.textContent = props.chain;
@@ -223,11 +224,6 @@ function buildPointList(points) {
     address.textContent = props.address_norm || '-';
 
     item.append(chain, title, meta, address);
-    item.addEventListener('mouseenter', () => previewPoint(props.supply_point_id));
-    item.addEventListener('mouseleave', () => clearPreviewPoint(props.supply_point_id));
-    item.addEventListener('focus', () => previewPoint(props.supply_point_id));
-    item.addEventListener('blur', () => clearPreviewPoint(props.supply_point_id));
-    item.addEventListener('click', () => activatePoint(props.supply_point_id));
     elements.pointList.appendChild(item);
   }
 }
@@ -256,26 +252,28 @@ function highlightedSupplyPointId() {
   return previewSupplyPointId ?? activeSupplyPointId;
 }
 
+/** Normalizes supply point ids for DOM and feature lookup. */
+function supplyPointKey(supplyPointId) {
+  return supplyPointId == null ? '' : String(supplyPointId);
+}
+
 /** Finds the rendered feature for a supply point id. */
 function findPointFeature(supplyPointId) {
-  return (
-    pointSource.getFeatures().find((feature) => feature.get('properties').supply_point_id === supplyPointId) ||
-    null
-  );
+  return featureIndex.get(supplyPointKey(supplyPointId)) || null;
 }
 
 /** Updates marker highlight state from current active or preview selection. */
 function syncPointHighlight() {
   const highlightedId = highlightedSupplyPointId();
   for (const feature of pointSource.getFeatures()) {
-    feature.set('active', feature.get('properties').supply_point_id === highlightedId);
+    feature.set('active', supplyPointKey(feature.get('properties').supply_point_id) === supplyPointKey(highlightedId));
   }
 }
 
 /** Updates active styling in the side list without rebuilding focused elements. */
 function syncPointListSelection() {
   for (const item of elements.pointList.querySelectorAll('.point-item[data-supply-point-id]')) {
-    item.classList.toggle('active', item.dataset.supplyPointId === String(activeSupplyPointId));
+    item.classList.toggle('active', item.dataset.supplyPointId === supplyPointKey(activeSupplyPointId));
   }
 }
 
@@ -288,7 +286,7 @@ function openPopupForFeature(feature) {
 
 /** Marks one supply point active and opens its popup. */
 function activatePoint(supplyPointId) {
-  activeSupplyPointId = supplyPointId;
+  activeSupplyPointId = supplyPointKey(supplyPointId);
   previewSupplyPointId = null;
   syncPointHighlight();
   syncPointListSelection();
@@ -298,7 +296,7 @@ function activatePoint(supplyPointId) {
 
 /** Temporarily previews one supply point from the side list. */
 function previewPoint(supplyPointId) {
-  previewSupplyPointId = supplyPointId;
+  previewSupplyPointId = supplyPointKey(supplyPointId);
   syncPointHighlight();
   const feature = findPointFeature(supplyPointId);
   if (feature) openPopupForFeature(feature);
@@ -306,7 +304,7 @@ function previewPoint(supplyPointId) {
 
 /** Clears one temporary preview and restores the active popup if present. */
 function clearPreviewPoint(supplyPointId) {
-  if (previewSupplyPointId !== supplyPointId) return;
+  if (previewSupplyPointId !== supplyPointKey(supplyPointId)) return;
   previewSupplyPointId = null;
   syncPointHighlight();
   const activeFeature = activeSupplyPointId ? findPointFeature(activeSupplyPointId) : null;
@@ -364,16 +362,24 @@ function renderCurrentLocation(coord) {
 
 /** Converts matched GeoJSON points into OpenLayers features. */
 function renderMatchedPoints(points) {
+  featureIndex.clear();
   pointSource.clear();
   const features = points.map((feature) => {
     const olFeature = new ol.Feature({
       geometry: new ol.geom.Point(ol.proj.fromLonLat(feature.geometry.coordinates))
     });
     olFeature.set('properties', feature.properties);
-    olFeature.set('active', feature.properties.supply_point_id === highlightedSupplyPointId());
+    const featureKey = supplyPointKey(feature.properties.supply_point_id);
+    olFeature.set('active', featureKey === supplyPointKey(highlightedSupplyPointId()));
+    featureIndex.set(featureKey, olFeature);
     return olFeature;
   });
   pointSource.addFeatures(features);
+}
+
+/** Finds the result-list item button from a delegated event target. */
+function findPointListItem(node) {
+  return node instanceof Element ? node.closest('.point-item[data-supply-point-id]') : null;
 }
 
 /** Fits the map view to the currently visible route and points. */
@@ -478,7 +484,7 @@ function applyResultFilters() {
     );
     return chainMatched && precisionMatched;
   });
-  const visibleIds = new Set(filteredPoints.map((feature) => feature.properties.supply_point_id));
+  const visibleIds = new Set(filteredPoints.map((feature) => supplyPointKey(feature.properties.supply_point_id)));
   if (activeId && !visibleIds.has(activeId)) {
     activeSupplyPointId = null;
   }
@@ -595,7 +601,32 @@ function bindEvents() {
     input.addEventListener('change', applyResultFilters);
   }
   elements.gpxFile.addEventListener('change', handleGpxFile);
-  elements.useCurrentLocation?.addEventListener('click', handleCurrentLocation);
+  elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
+  elements.pointList.addEventListener('mouseover', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item || item === findPointListItem(event.relatedTarget)) return;
+    previewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('mouseout', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item || item === findPointListItem(event.relatedTarget)) return;
+    clearPreviewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('focusin', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item) return;
+    previewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('focusout', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item || item === findPointListItem(event.relatedTarget)) return;
+    clearPreviewPoint(item.dataset.supplyPointId);
+  });
+  elements.pointList.addEventListener('click', (event) => {
+    const item = findPointListItem(event.target);
+    if (!item) return;
+    activatePoint(item.dataset.supplyPointId);
+  });
   elements.popupClose.addEventListener('click', clearPopup);
   map.on('singleclick', (event) => {
     const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
