@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { computeBbox, expandBbox, pointToRouteDistanceMeters } = require('../frontend/route_math');
+const {
+  computeBbox,
+  expandBbox,
+  pointToPointDistanceMeters,
+  pointToRouteDistanceMeters
+} = require('../frontend/route_math');
 const { parseCoordinateTokens, parseGpxText } = require('../frontend/gpx');
 
 test('Route Math: GPX から trkpt を順序通り抽出できる', () => {
@@ -73,4 +78,15 @@ test('Route Math: 経路から離れた点は数百メートル以上になる',
     ]
   );
   assert.ok(distance > 500);
+});
+
+test('Route Math: 単一点どうしの距離をメートル換算できる', () => {
+  const distance = pointToPointDistanceMeters([139.0, 35.0], [139.001, 35.0]);
+  assert.ok(distance > 80);
+  assert.ok(distance < 100);
+});
+
+test('Route Math: 非数値の座標は無限距離として扱う', () => {
+  const distance = pointToPointDistanceMeters([139.0, Number.NaN], [139.001, 35.0]);
+  assert.equal(distance, Number.POSITIVE_INFINITY);
 });

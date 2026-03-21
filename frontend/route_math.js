@@ -68,6 +68,22 @@
     return minDistance;
   }
 
+  /** Computes the direct distance between two lon/lat points in meters. */
+  function pointToPointDistanceMeters(pointA, pointB) {
+    const isValidPoint = (point) =>
+      Array.isArray(point) &&
+      point.length >= 2 &&
+      Number.isFinite(point[0]) &&
+      Number.isFinite(point[1]);
+    if (!isValidPoint(pointA) || !isValidPoint(pointB)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const referenceLat = (pointA[1] + pointB[1]) / 2;
+    const a = projectLonLatToMeters(pointA, referenceLat);
+    const b = projectLonLatToMeters(pointB, referenceLat);
+    return Math.hypot(a[0] - b[0], a[1] - b[1]);
+  }
+
   /** Converts a meter padding value to degree deltas around a latitude. */
   function metersToDegreePadding(latitude, meters) {
     const latPadding = meters / 111320;
@@ -111,6 +127,7 @@
   return {
     computeBbox,
     expandBbox,
+    pointToPointDistanceMeters,
     pointToRouteDistanceMeters
   };
 });
