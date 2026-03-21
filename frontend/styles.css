@@ -270,7 +270,6 @@ input:disabled {
   flex-direction: column;
   gap: 8px;
   height: 640px;
-  min-height: 640px;
 }
 
 .filter-panel {

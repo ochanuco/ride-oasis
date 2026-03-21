@@ -111,7 +111,6 @@ let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
 let previewSupplyPointId = null;
-let lastCandidateCount = 0;
 const API_PAGE_LIMIT = 10000;
 
 /** Returns the currently selected route source mode. */
@@ -126,13 +125,15 @@ function formatDistance(distanceMeters) {
 
 /** Returns the selected ladder distance in meters. */
 function selectedDistanceMeters() {
-  const index = Number(elements.distanceThreshold?.value);
+  const index = Number(elements.distanceThreshold.value);
   return DISTANCE_OPTIONS[index] ?? 1000;
 }
 
 /** Syncs the visible distance label beside the ladder. */
 function syncDistanceUi() {
-  elements.distanceCurrent.textContent = formatDistance(selectedDistanceMeters());
+  const distanceText = formatDistance(selectedDistanceMeters());
+  elements.distanceCurrent.textContent = distanceText;
+  elements.distanceThreshold.setAttribute('aria-valuetext', `${distanceText}以内`);
 }
 
 /** Returns the currently enabled chain filters from the result toolbar. */
@@ -172,10 +173,9 @@ function syncSourceModeUi() {
 function resetResults() {
   allMatchedPoints = [];
   filteredPoints = [];
-  lastCandidateCount = 0;
   pointSource.clear();
   buildPointList([]);
-  updateSummary(0, 0);
+  updateSummary(0);
   clearPopup();
 }
 
@@ -329,7 +329,7 @@ function clearPopup() {
 }
 
 /** Updates summary card for visible results. */
-function updateSummary(_candidateCount, visibleCount) {
+function updateSummary(visibleCount) {
   elements.matchedCount.textContent = String(visibleCount);
 }
 
@@ -469,6 +469,8 @@ function filterMatchedPoints(featureCollection, distanceMeters) {
 function applyResultFilters() {
   const chains = new Set(selectedResultChains());
   const precisionFilters = selectedPrecisionFilters();
+  const activeId = activeSupplyPointId;
+  const previewId = previewSupplyPointId;
   filteredPoints = allMatchedPoints.filter((feature) => {
     const chainMatched = chains.has(feature.properties.chain);
     const precisionMatched = precisionFilters.has(
@@ -476,10 +478,26 @@ function applyResultFilters() {
     );
     return chainMatched && precisionMatched;
   });
-  clearPopup();
+  const visibleIds = new Set(filteredPoints.map((feature) => feature.properties.supply_point_id));
+  if (activeId && !visibleIds.has(activeId)) {
+    activeSupplyPointId = null;
+  }
+  if (previewId && !visibleIds.has(previewId)) {
+    previewSupplyPointId = null;
+  }
   renderMatchedPoints(filteredPoints);
   buildPointList(filteredPoints);
-  updateSummary(lastCandidateCount, filteredPoints.length);
+  syncPointHighlight();
+  syncPointListSelection();
+  const highlightedId = highlightedSupplyPointId();
+  const highlightedFeature = highlightedId ? findPointFeature(highlightedId) : null;
+  if (highlightedFeature) {
+    openPopupForFeature(highlightedFeature);
+  } else {
+    elements.popup.hidden = true;
+    popupOverlay.setPosition(undefined);
+  }
+  updateSummary(filteredPoints.length);
   fitToVisibleData();
   setStatus(`${filteredPoints.length} 件を表示中`);
 }
@@ -498,7 +516,6 @@ async function refreshMap() {
   try {
     const candidates = await fetchCandidatePoints(distanceMeters);
     allMatchedPoints = filterMatchedPoints(candidates, distanceMeters);
-    lastCandidateCount = candidates.features.length;
     applyResultFilters();
   } catch (error) {
     setStatus('補給地点の取得に失敗しました');
@@ -567,8 +584,8 @@ function bindEvents() {
   for (const input of document.querySelectorAll('input[name="source-mode"]')) {
     input.addEventListener('change', syncSourceModeUi);
   }
-  elements.distanceThreshold?.addEventListener('input', syncDistanceUi);
-  elements.distanceThreshold?.addEventListener('change', () => {
+  elements.distanceThreshold.addEventListener('input', syncDistanceUi);
+  elements.distanceThreshold.addEventListener('change', () => {
     syncDistanceUi();
     if (routeCoordinates.length) {
       refreshMap();
@@ -594,5 +611,5 @@ syncSourceModeUi();
 updateRoutePointCount();
 syncDistanceUi();
 buildPointList([]);
-updateSummary(0, 0);
+updateSummary(0);
 bindEvents();

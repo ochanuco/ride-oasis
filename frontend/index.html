@@ -43,7 +43,7 @@
         </div>
 
         <fieldset class="distance-ladder">
-          <legend>近傍距離</legend>
+          <legend id="distance-threshold-label">近傍距離</legend>
           <div class="distance-header">
             <div class="distance-current" id="distance-current">1km</div>
           </div>
@@ -55,6 +55,9 @@
             step="1"
             value="3"
             list="distance-threshold-labels"
+            aria-labelledby="distance-threshold-label"
+            aria-valuemin="100"
+            aria-valuemax="10000"
           />
           <datalist id="distance-threshold-labels">
             <option value="0" label="100m"></option>
