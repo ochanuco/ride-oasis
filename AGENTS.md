@@ -1,13 +1,13 @@
 # AGENTS.md
 
-このリポジトリで作業するエージェント向けのガイドです。`plan.md` を正として、実装とドキュメントを進めてください。
+このリポジトリで作業するエージェント向けのガイドです。実装方針はこのファイルと README、未実装項目は GitHub Issues を正として進めてください。
 
 ## 最優先の前提
 
 - 目的は「補給地点DB」を BigQuery マートとして提供すること
 - 公式サイトの変更に追従しやすいよう、クロールは Codex + Playwright 前提
 - 住所正規化/座標付与は Cloud Run 側で実行し、Dataform は BQ 内完結
-- `plan.md` 上のコア対象チェーンは 7-Eleven / Lawson / FamilyMart（拡張可能な設計）
+- コア対象チェーンは 7-Eleven / Lawson / FamilyMart（拡張可能な設計）
 - 現在の実装済みクローラは 7-Eleven / Lawson / FamilyMart / Daily Yamazaki / 道の駅 / MINISTOP
 
 ## コンポーネント責務
@@ -18,7 +18,7 @@
 
 ## 作業ルール
 
-- `plan.md` の仕様に反する提案や実装は行わない（必要なら先に提案して合意を取る）
+- README / AGENTS / 既存 Issue の方針に反する提案や実装は行わない（必要なら先に提案して合意を取る）
 - `raw.stores_scraped_*` の詳細スキーマはクロール実装に合わせて確定する
 - `raw.stores_geocoded` は単一テーブルで共通スキーマを維持する
 - 住所正規化は 1 住所 1 回を原則とし、再計算を避ける
