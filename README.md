@@ -42,7 +42,7 @@
 - `mart.rideoasis_supply_points`: 供給点マート
 - `ops.*`: 未解決・品質監視
 
-詳細は `plan.md` を参照してください。
+未実装の運用・配備項目は GitHub Issues を参照してください。
 
 ## ディレクトリ（予定）
 
