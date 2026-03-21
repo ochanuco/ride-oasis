@@ -113,6 +113,8 @@ let activeSupplyPointId = null;
 let previewSupplyPointId = null;
 const API_PAGE_LIMIT = 10000;
 const featureIndex = new Map();
+let latestRouteLoadToken = 0;
+let latestRefreshToken = 0;
 
 /** Returns the currently selected route source mode. */
 function selectedSourceMode() {
@@ -185,6 +187,11 @@ function resetResults() {
 function updateRoutePointCount() {
   const count = routeCoordinates.length;
   elements.routePointCount.textContent = `経路点数: ${count > 0 ? count : '-'}`;
+}
+
+/** Invalidates in-flight candidate refreshes after route source changes. */
+function cancelPendingRefreshes() {
+  latestRefreshToken += 1;
 }
 
 /** Renders the matched supply point list beside the map. */
@@ -401,19 +408,21 @@ function fitToVisibleData() {
 /** Parses GPX text and converts it into an OpenLayers route feature. */
 function createRouteFeatureFromGpx(gpxText) {
   const parsed = window.GpxParser.parseGpxText(gpxText);
-  routeCoordinates = parsed.geometry.coordinates;
-  return routeGeoJsonFormat.readFeature(parsed);
+  return {
+    coordinates: parsed.geometry.coordinates,
+    feature: routeGeoJsonFormat.readFeature(parsed)
+  };
 }
 
 /** Expands the route bbox so the API can return nearby candidate points. */
-function expandedBboxForQuery(distanceMeters) {
-  const routeBbox = window.RouteMath.computeBbox(routeCoordinates);
+function expandedBboxForQuery(routeSnapshot, distanceMeters) {
+  const routeBbox = window.RouteMath.computeBbox(routeSnapshot);
   return window.RouteMath.expandBbox(routeBbox, Math.max(distanceMeters, 2000));
 }
 
 /** Loads candidate supply points from the local API for the current filters. */
-async function fetchCandidatePoints(distanceMeters) {
-  const bbox = expandedBboxForQuery(distanceMeters);
+async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
+  const bbox = expandedBboxForQuery(routeSnapshot, distanceMeters);
   const features = [];
   const seenIds = new Set();
   let offset = 0;
@@ -452,12 +461,12 @@ async function fetchCandidatePoints(distanceMeters) {
 }
 
 /** Applies the browser-side point-to-route distance filter. */
-function filterMatchedPoints(featureCollection, distanceMeters) {
-  const origin = routeCoordinates[0] || null;
+function filterMatchedPoints(featureCollection, routeSnapshot, distanceMeters) {
+  const origin = routeSnapshot[0] || null;
   return featureCollection.features
     .map((feature) => {
-      const distance = routeCoordinates.length >= 2
-        ? window.RouteMath.pointToRouteDistanceMeters(feature.geometry.coordinates, routeCoordinates)
+      const distance = routeSnapshot.length >= 2
+        ? window.RouteMath.pointToRouteDistanceMeters(feature.geometry.coordinates, routeSnapshot)
         : window.RouteMath.pointToPointDistanceMeters(feature.geometry.coordinates, origin);
       return {
         ...feature,
@@ -509,21 +518,25 @@ function applyResultFilters() {
 }
 
 /** Refreshes API candidates and matched points for the loaded route. */
-async function refreshMap() {
-  if (!routeCoordinates.length) {
+async function refreshMap(routeSnapshot = [...routeCoordinates]) {
+  if (!routeSnapshot.length) {
     setStatus('先に GPX か現在地を指定してください');
     return;
   }
 
   clearPopup();
   const distanceMeters = selectedDistanceMeters();
+  const refreshToken = ++latestRefreshToken;
   setStatus('補給地点を検索中...');
 
   try {
-    const candidates = await fetchCandidatePoints(distanceMeters);
-    allMatchedPoints = filterMatchedPoints(candidates, distanceMeters);
+    const candidates = await fetchCandidatePoints(routeSnapshot, distanceMeters);
+    if (refreshToken !== latestRefreshToken) return;
+    allMatchedPoints = filterMatchedPoints(candidates, routeSnapshot, distanceMeters);
+    if (refreshToken !== latestRefreshToken) return;
     applyResultFilters();
   } catch (error) {
+    if (refreshToken !== latestRefreshToken) return;
     setStatus('補給地点の取得に失敗しました');
     console.error(error);
   }
@@ -533,17 +546,26 @@ async function refreshMap() {
 async function handleGpxFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  const previousFileName = elements.gpxFileName.textContent;
   try {
-    elements.gpxFileName.textContent = file.name;
     const gpxText = await file.text();
-    routeFeature = createRouteFeatureFromGpx(gpxText);
+    if (loadToken !== latestRouteLoadToken) return;
+    const parsedRoute = createRouteFeatureFromGpx(gpxText);
+    if (loadToken !== latestRouteLoadToken) return;
+    routeFeature = parsedRoute.feature;
+    routeCoordinates = parsedRoute.coordinates;
+    elements.gpxFileName.textContent = file.name;
     renderRoute(routeFeature);
     resetResults();
     updateRoutePointCount();
     fitToVisibleData();
     setStatus(`GPX を読み込みました: ${file.name}`);
-    await refreshMap();
+    await refreshMap([...routeCoordinates]);
   } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
+    elements.gpxFileName.textContent = previousFileName;
     setStatus(error?.message || 'GPX の読み込みに失敗しました');
     console.error(error);
   }
@@ -556,6 +578,8 @@ async function handleCurrentLocation() {
     return;
   }
 
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
   setStatus('現在地を取得中...');
   try {
     const position = await new Promise((resolve, reject) => {
@@ -565,6 +589,7 @@ async function handleCurrentLocation() {
         maximumAge: 60000
       });
     });
+    if (loadToken !== latestRouteLoadToken) return;
     const coord = [position.coords.longitude, position.coords.latitude];
     routeFeature = null;
     routeCoordinates = [coord];
@@ -573,8 +598,9 @@ async function handleCurrentLocation() {
     updateRoutePointCount();
     fitToVisibleData();
     setStatus('現在地を取得しました');
-    await refreshMap();
+    await refreshMap([...routeCoordinates]);
   } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
     const message = error?.code === 1
       ? '位置情報の利用が許可されていません'
       : error?.code === 3
