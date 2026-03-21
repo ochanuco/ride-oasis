@@ -3,6 +3,7 @@ const API_BASE = window.RIDEOASIS_API_BASE || '/api';
 const elements = {
   status: document.getElementById('status'),
   gpxFile: document.getElementById('gpx-file'),
+  useCurrentLocation: document.getElementById('use-current-location'),
   distanceThreshold: document.getElementById('distance-threshold'),
   minPointLevel: document.getElementById('min-point-level'),
   refresh: document.getElementById('refresh'),
@@ -20,6 +21,7 @@ const routeGeoJsonFormat = new ol.format.GeoJSON({ featureProjection: 'EPSG:3857
 const routeSource = new ol.source.Vector();
 const pointSource = new ol.source.Vector();
 const endpointSource = new ol.source.Vector();
+const currentLocationSource = new ol.source.Vector();
 
 const routeLayer = new ol.layer.Vector({
   source: routeSource,
@@ -64,13 +66,25 @@ const endpointLayer = new ol.layer.Vector({
   }
 });
 
+const currentLocationLayer = new ol.layer.Vector({
+  source: currentLocationSource,
+  style: new ol.style.Style({
+    image: new ol.style.Circle({
+      radius: 7,
+      fill: new ol.style.Fill({ color: '#c76b12' }),
+      stroke: new ol.style.Stroke({ color: '#ffffff', width: 2 })
+    })
+  })
+});
+
 const map = new ol.Map({
   target: 'map',
   layers: [
     new ol.layer.Tile({ source: new ol.source.OSM() }),
     routeLayer,
     pointLayer,
-    endpointLayer
+    endpointLayer,
+    currentLocationLayer
   ],
   view: new ol.View({
     center: ol.proj.fromLonLat([139.767, 35.681]),
@@ -211,6 +225,7 @@ function updateSummary(candidateCount, matchedCount) {
 function renderRoute(feature) {
   routeSource.clear();
   endpointSource.clear();
+  currentLocationSource.clear();
   routeSource.addFeature(feature);
 
   const coordinates = feature.getGeometry().getCoordinates();
@@ -225,6 +240,18 @@ function renderRoute(feature) {
     goal.set('kind', 'goal');
     endpointSource.addFeatures([start, goal]);
   }
+}
+
+/** Renders a single current-location marker instead of a route line. */
+function renderCurrentLocation(coord) {
+  routeSource.clear();
+  endpointSource.clear();
+  currentLocationSource.clear();
+  currentLocationSource.addFeature(
+    new ol.Feature({
+      geometry: new ol.geom.Point(ol.proj.fromLonLat(coord))
+    })
+  );
 }
 
 /** Converts matched GeoJSON points into OpenLayers features. */
@@ -245,7 +272,7 @@ function renderMatchedPoints(points) {
 function fitToVisibleData() {
   const extent = ol.extent.createEmpty();
   let hasData = false;
-  for (const source of [routeSource, pointSource, endpointSource]) {
+  for (const source of [routeSource, pointSource, endpointSource, currentLocationSource]) {
     const sourceExtent = source.getExtent();
     if (sourceExtent && !ol.extent.isEmpty(sourceExtent)) {
       ol.extent.extend(extent, sourceExtent);
@@ -315,12 +342,12 @@ async function fetchCandidatePoints(distanceMeters) {
 
 /** Applies the browser-side point-to-route distance filter. */
 function filterMatchedPoints(featureCollection, distanceMeters) {
+  const origin = routeCoordinates[0] || null;
   return featureCollection.features
     .map((feature) => {
-      const distance = window.RouteMath.pointToRouteDistanceMeters(
-        feature.geometry.coordinates,
-        routeCoordinates
-      );
+      const distance = routeCoordinates.length >= 2
+        ? window.RouteMath.pointToRouteDistanceMeters(feature.geometry.coordinates, routeCoordinates)
+        : window.RouteMath.pointToPointDistanceMeters(feature.geometry.coordinates, origin);
       return {
         ...feature,
         properties: {
@@ -336,7 +363,7 @@ function filterMatchedPoints(featureCollection, distanceMeters) {
 /** Refreshes API candidates and matched points for the loaded route. */
 async function refreshMap() {
   if (!routeCoordinates.length) {
-    setStatus('先に GPX を読み込んでください');
+    setStatus('先に GPX か現在地を読み込んでください');
     return;
   }
 
@@ -376,9 +403,45 @@ async function handleGpxFile(event) {
   }
 }
 
+/** Prompts the browser for the device's current position and refreshes nearby points. */
+async function handleCurrentLocation() {
+  if (!navigator.geolocation) {
+    setStatus('このブラウザは現在地取得に対応していません');
+    return;
+  }
+
+  setStatus('現在地を取得中...');
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
+      });
+    });
+    const coord = [position.coords.longitude, position.coords.latitude];
+    routeFeature = null;
+    routeCoordinates = [coord];
+    renderCurrentLocation(coord);
+    updateSummary(0, 0);
+    fitToVisibleData();
+    setStatus('現在地を取得しました');
+    await refreshMap();
+  } catch (error) {
+    const message = error?.code === 1
+      ? '位置情報の利用が許可されていません'
+      : error?.code === 3
+        ? '現在地の取得がタイムアウトしました'
+        : '現在地の取得に失敗しました';
+    setStatus(message);
+    console.error(error);
+  }
+}
+
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   elements.gpxFile.addEventListener('change', handleGpxFile);
+  elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
   elements.refresh.addEventListener('click', refreshMap);
   elements.popupClose.addEventListener('click', clearPopup);
   map.on('singleclick', (event) => {
