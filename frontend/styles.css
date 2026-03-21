@@ -119,6 +119,12 @@ body {
 
 .controls .secondary-action:hover {
   background: #fbf3e8;
+  color: var(--accent-deep);
+}
+
+.controls .secondary-action:focus-visible {
+  background: #fbf3e8;
+  color: var(--accent-deep);
 }
 
 .chains {

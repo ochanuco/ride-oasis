@@ -85,3 +85,8 @@ test('Route Math: 単一点どうしの距離をメートル換算できる', ()
   assert.ok(distance > 80);
   assert.ok(distance < 100);
 });
+
+test('Route Math: 非数値の座標は無限距離として扱う', () => {
+  const distance = pointToPointDistanceMeters([139.0, Number.NaN], [139.001, 35.0]);
+  assert.equal(distance, Number.POSITIVE_INFINITY);
+});

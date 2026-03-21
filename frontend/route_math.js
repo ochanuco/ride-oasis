@@ -70,7 +70,12 @@
 
   /** Computes the direct distance between two lon/lat points in meters. */
   function pointToPointDistanceMeters(pointA, pointB) {
-    if (!Array.isArray(pointA) || !Array.isArray(pointB) || pointA.length < 2 || pointB.length < 2) {
+    const isValidPoint = (point) =>
+      Array.isArray(point) &&
+      point.length >= 2 &&
+      Number.isFinite(point[0]) &&
+      Number.isFinite(point[1]);
+    if (!isValidPoint(pointA) || !isValidPoint(pointB)) {
       return Number.POSITIVE_INFINITY;
     }
     const referenceLat = (pointA[1] + pointB[1]) / 2;

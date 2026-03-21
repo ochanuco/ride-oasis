@@ -441,8 +441,8 @@ async function handleCurrentLocation() {
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   elements.gpxFile.addEventListener('change', handleGpxFile);
-  elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
-  elements.refresh.addEventListener('click', refreshMap);
+  elements.useCurrentLocation?.addEventListener('click', handleCurrentLocation);
+  elements.refresh?.addEventListener('click', refreshMap);
   elements.popupClose.addEventListener('click', clearPopup);
   map.on('singleclick', (event) => {
     const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
