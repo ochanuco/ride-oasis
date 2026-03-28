@@ -1,0 +1,99 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "timezone": "Asia/Tokyo",
+  "dependencyDashboard": true,
+  "labels": [
+    "dependencies"
+  ],
+  "rangeStrategy": "bump",
+  "minimumReleaseAge": "7 days",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "separateMajorMinor": true,
+  "separateMultipleMajor": true,
+  "vulnerabilityAlerts": {
+    "labels": [
+      "dependencies",
+      "security"
+    ]
+  },
+  "ignorePaths": [
+    ".local/**",
+    "data/**",
+    "node_modules/**"
+  ],
+  "packageRules": [
+    {
+      "matchDepTypes": [
+        "dependencies"
+      ],
+      "groupName": "production dependencies"
+    },
+    {
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "groupName": "development dependencies"
+    },
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "major"
+      ]
+    },
+    {
+      "matchDepTypes": [
+        "dependencies"
+      ],
+      "minimumReleaseAge": "14 days",
+      "labels": [
+        "dependencies",
+        "runtime"
+      ]
+    },
+    {
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "minimumReleaseAge": "7 days",
+      "labels": [
+        "dependencies",
+        "devtools"
+      ]
+    },
+    {
+      "matchPackageNames": [
+        "playwright",
+        "@playwright/test"
+      ],
+      "groupName": "playwright"
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "github actions",
+      "labels": [
+        "dependencies",
+        "github-actions"
+      ]
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 5am on the first day of the month"
+    ],
+    "labels": [
+      "dependencies",
+      "lockfile"
+    ]
+  }
+}

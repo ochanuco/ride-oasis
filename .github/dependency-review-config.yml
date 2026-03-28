@@ -1,0 +1,9 @@
+fail-on-severity: high
+fail-on-scopes:
+  - runtime
+  - development
+  - unknown
+vulnerability-check: true
+license-check: true
+show-patched-versions: true
+comment-summary-in-pr: never

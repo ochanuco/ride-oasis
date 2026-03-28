@@ -17,8 +17,10 @@
     "map:serve": "node scripts/map_dev_server.js"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.5.0",
+    "npm": ">=11.9.0"
   },
+  "packageManager": "npm@11.9.0",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/ochanuco/ride-oasis.git"
