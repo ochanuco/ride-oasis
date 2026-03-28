@@ -131,3 +131,17 @@ npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787
 
 - クローリング対象サイトの利用規約/robots を確認し、アクセス頻度を制限します。
 - `raw.stores_scraped_*` の詳細スキーマはクロール実装に合わせて確定します。
+
+## 依存更新
+
+Renovate を使って npm 依存の更新 PR を作成します。リポジトリで Renovate GitHub App を有効化すると、ルートの [`renovate.json`](renovate.json) に従って運用されます。
+
+- `dependencies` / `devDependencies` を分類して PR を作成
+- major update には `major` ラベルを追加
+- 公開直後の新規リリースは一定期間取り込まず、短時間の hijack や誤配布に巻き込まれにくくする
+- runtime 依存は `14 days`、dev 依存は `7 days` 待ってから更新候補にする
+- 複数依存の一括更新を避け、レビューしやすい粒度で PR を分ける
+- GitHub Actions は SHA 固定で管理し、`# vX.Y.Z` コメント付きの更新を Renovate に追従させる
+- lock file maintenance を毎月 1 回実行
+
+GitHub Actions では dependency review を有効化し、`package.json` / `package-lock.json` の差分に `high` 以上の既知脆弱性が入る PR をブロックします。`development` / `unknown` スコープも対象に含め、`actions/checkout` は `persist-credentials: false` で不要な認証情報の持ち回りを避けます。
