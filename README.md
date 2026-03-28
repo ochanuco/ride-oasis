@@ -145,3 +145,15 @@ Renovate を使って npm 依存の更新 PR を作成します。リポジト�
 - lock file maintenance を毎月 1 回実行
 
 GitHub Actions では dependency review を有効化し、`package.json` / `package-lock.json` の差分に `high` 以上の既知脆弱性が入る PR をブロックします。`development` / `unknown` スコープも対象に含め、`actions/checkout` は `persist-credentials: false` で不要な認証情報の持ち回りを避けます。
+
+## point_level 閾値メモ
+
+- `point_level` の閾値を下げると、未解決件数は減り、成功率は上がります。
+- ただし実世界の座標精度は下がりやすく、地図上のズレが増える可能性があります。
+- KPI改善（成功率上昇）は、必ずしも品質改善を意味しません。
+
+運用では次をセットで確認します。
+
+- `strict_success_rate`（`point_level >= 閾値` を満たす成功率）
+- `point_level` 分布（1 / 2 / 3 / 8 / null）
+- `unresolved_rows`（未解決件数）
