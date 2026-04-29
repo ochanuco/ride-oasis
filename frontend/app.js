@@ -14,6 +14,8 @@ const elements = {
   useCurrentLocation: document.getElementById('use-current-location'),
   gpxPanel: document.getElementById('gpx-panel'),
   currentLocationPanel: document.getElementById('current-location-panel'),
+  manualPanel: document.getElementById('manual-panel'),
+  manualReset: document.getElementById('manual-reset'),
   gpxFileName: document.getElementById('gpx-file-name'),
   routePointCount: document.getElementById('route-point-count'),
   distanceThreshold: document.getElementById('distance-threshold'),
@@ -114,6 +116,7 @@ map.addOverlay(popupOverlay);
 
 let routeFeature = null;
 let routeCoordinates = [];
+let manualPoints = [];
 let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
@@ -175,11 +178,13 @@ function setStatus(message) {
 
 /** Syncs source-mode panel state so only one input path is active at a time. */
 function syncSourceModeUi() {
-  const gpxActive = selectedSourceMode() === 'gpx';
-  elements.gpxFile.disabled = !gpxActive;
-  elements.useCurrentLocation.disabled = gpxActive;
-  elements.gpxPanel.classList.toggle('inactive', !gpxActive);
-  elements.currentLocationPanel.classList.toggle('inactive', gpxActive);
+  const mode = selectedSourceMode();
+  elements.gpxFile.disabled = mode !== 'gpx';
+  elements.useCurrentLocation.disabled = mode !== 'current';
+  elements.manualReset.disabled = mode !== 'manual';
+  elements.gpxPanel.classList.toggle('inactive', mode !== 'gpx');
+  elements.currentLocationPanel.classList.toggle('inactive', mode !== 'current');
+  elements.manualPanel.classList.toggle('inactive', mode !== 'manual');
 }
 
 /** Resets visible and cached result points before a new search. */
@@ -348,11 +353,16 @@ function updateSummary(visibleCount) {
   elements.matchedCount.textContent = String(visibleCount);
 }
 
-/** Renders the uploaded route and its start/end markers. */
-function renderRoute(feature) {
+/** Clears the three drawing sources used for route and location visuals. */
+function clearRouteVisualSources() {
   routeSource.clear();
   endpointSource.clear();
   currentLocationSource.clear();
+}
+
+/** Renders the uploaded route and its start/end markers. */
+function renderRoute(feature) {
+  clearRouteVisualSources();
   routeSource.addFeature(feature);
 
   const coordinates = feature.getGeometry().getCoordinates();
@@ -365,11 +375,35 @@ function renderRoute(feature) {
   }
 }
 
+/** Renders manual-mode endpoints and the connecting straight LineString. */
+function renderManualPoints() {
+  clearRouteVisualSources();
+
+  if (manualPoints.length === 0) return;
+
+  const start = new ol.Feature({
+    geometry: new ol.geom.Point(ol.proj.fromLonLat(manualPoints[0]))
+  });
+  start.set('kind', 'start');
+  endpointSource.addFeature(start);
+
+  if (manualPoints.length >= 2) {
+    const goal = new ol.Feature({
+      geometry: new ol.geom.Point(ol.proj.fromLonLat(manualPoints[1]))
+    });
+    goal.set('kind', 'goal');
+    endpointSource.addFeature(goal);
+
+    const line = new ol.Feature({
+      geometry: new ol.geom.LineString(manualPoints.map((coord) => ol.proj.fromLonLat(coord)))
+    });
+    routeSource.addFeature(line);
+  }
+}
+
 /** Renders a single current-location marker instead of a route line. */
 function renderCurrentLocation(coord) {
-  routeSource.clear();
-  endpointSource.clear();
-  currentLocationSource.clear();
+  clearRouteVisualSources();
   currentLocationSource.addFeature(
     new ol.Feature({
       geometry: new ol.geom.Point(ol.proj.fromLonLat(coord))
@@ -566,6 +600,7 @@ async function handleGpxFile(event) {
     if (loadToken !== latestRouteLoadToken) return;
     routeFeature = parsedRoute.feature;
     routeCoordinates = parsedRoute.coordinates;
+    manualPoints = [];
     elements.gpxFileName.textContent = file.name;
     renderRoute(routeFeature);
     resetResults();
@@ -578,6 +613,51 @@ async function handleGpxFile(event) {
     elements.gpxFileName.textContent = previousFileName;
     setStatus(error?.message || 'GPX の読み込みに失敗しました');
     console.error(error);
+  }
+}
+
+/** Records a manual map click as start (1st click) or goal (2nd click) and refreshes the map. */
+async function handleManualMapClick(mapCoord) {
+  if (manualPoints.length >= 2) return;
+
+  const lonLat = ol.proj.toLonLat(mapCoord);
+  manualPoints.push([lonLat[0], lonLat[1]]);
+  renderManualPoints();
+
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+
+  if (manualPoints.length === 1) {
+    routeFeature = null;
+    routeCoordinates = [];
+    resetResults();
+    updateRoutePointCount();
+    setStatus('目的地をクリックしてください');
+    return;
+  }
+
+  routeFeature = routeSource.getFeatures()[0] || null;
+  routeCoordinates = manualPoints.map((coord) => [coord[0], coord[1]]);
+  resetResults();
+  updateRoutePointCount();
+  fitToVisibleData();
+  setStatus('手動経路を生成しました');
+  if (loadToken !== latestRouteLoadToken) return;
+  await refreshMap([...routeCoordinates]);
+}
+
+/** Resets manual-mode state so the user can re-pick start and goal. */
+function resetManualState() {
+  manualPoints = [];
+  routeFeature = null;
+  routeCoordinates = [];
+  ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  clearRouteVisualSources();
+  resetResults();
+  updateRoutePointCount();
+  if (selectedSourceMode() === 'manual') {
+    setStatus('地図をクリックして出発地を指定してください');
   }
 }
 
@@ -603,6 +683,7 @@ async function handleCurrentLocation() {
     const coord = [position.coords.longitude, position.coords.latitude];
     routeFeature = null;
     routeCoordinates = [coord];
+    manualPoints = [];
     renderCurrentLocation(coord);
     resetResults();
     updateRoutePointCount();
@@ -744,6 +825,7 @@ function handleGeoSearchInput() {
     clearTimeout(geoSearchDebounceTimer);
     geoSearchDebounceTimer = null;
   }
+  const token = ++latestGeoSearchToken;
 
   if (query.length < GEO_SEARCH_MIN_QUERY) {
     if (geoSearchAbortController) geoSearchAbortController.abort();
@@ -751,7 +833,6 @@ function handleGeoSearchInput() {
     return;
   }
 
-  const token = ++latestGeoSearchToken;
   geoSearchDebounceTimer = setTimeout(async () => {
     try {
       const items = await fetchPlaces(query);
@@ -770,6 +851,11 @@ function handleGeoSearchInput() {
 function handleGeoSearchClear() {
   elements.geoSearchInput.value = '';
   elements.geoSearchClear.hidden = true;
+  latestGeoSearchToken += 1;
+  if (geoSearchDebounceTimer) {
+    clearTimeout(geoSearchDebounceTimer);
+    geoSearchDebounceTimer = null;
+  }
   if (geoSearchAbortController) geoSearchAbortController.abort();
   clearGeoSearchResults();
   elements.geoSearchInput.focus();
@@ -778,7 +864,16 @@ function handleGeoSearchClear() {
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   for (const input of document.querySelectorAll('input[name="source-mode"]')) {
-    input.addEventListener('change', syncSourceModeUi);
+    input.addEventListener('change', () => {
+      const mode = selectedSourceMode();
+      if (mode !== 'manual' && manualPoints.length > 0) {
+        resetManualState();
+      }
+      syncSourceModeUi();
+      if (mode === 'manual' && manualPoints.length === 0 && routeCoordinates.length === 0) {
+        setStatus('地図をクリックして出発地を指定してください');
+      }
+    });
   }
   elements.distanceThreshold.addEventListener('input', syncDistanceUi);
   elements.distanceThreshold.addEventListener('change', () => {
@@ -792,6 +887,7 @@ function bindEvents() {
   }
   elements.gpxFile.addEventListener('change', handleGpxFile);
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
+  elements.manualReset.addEventListener('click', resetManualState);
   elements.geoSearchInput.addEventListener('input', handleGeoSearchInput);
   elements.geoSearchClear.addEventListener('click', handleGeoSearchClear);
   document.addEventListener('click', (event) => {
@@ -833,11 +929,15 @@ function bindEvents() {
   elements.popupClose.addEventListener('click', clearPopup);
   map.on('singleclick', (event) => {
     const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
-    if (!feature || !feature.get('properties')) {
-      clearPopup();
+    const supplyFeature = feature && feature.get('properties') ? feature : null;
+    if (supplyFeature) {
+      activatePoint(supplyFeature.get('properties').supply_point_id);
       return;
     }
-    activatePoint(feature.get('properties').supply_point_id);
+    clearPopup();
+    if (selectedSourceMode() === 'manual') {
+      handleManualMapClick(event.coordinate);
+    }
   });
 }
 

@@ -17,7 +17,7 @@
           <h1>RideOasis Map</h1>
           <p class="subtitle">位置と近傍距離だけ決めて、結果をあとから絞り込む</p>
         </div>
-        <div class="status" id="status">GPX か現在地を指定してください</div>
+        <div class="status" id="status">経路を指定してください</div>
       </header>
 
       <section class="panel geo-search-panel">
@@ -34,6 +34,7 @@
           <legend>ルートの指定</legend>
           <label><input type="radio" name="source-mode" value="gpx" checked />GPX ファイル</label>
           <label><input type="radio" name="source-mode" value="current" />現在地</label>
+          <label><input type="radio" name="source-mode" value="manual" />手動2点指定</label>
         </fieldset>
 
         <div class="source-panel" id="gpx-panel">
@@ -49,6 +50,11 @@
 
         <div class="source-panel" id="current-location-panel">
           <button id="use-current-location" type="button" class="secondary-action">現在地を使う</button>
+        </div>
+
+        <div class="source-panel" id="manual-panel">
+          <p class="manual-instructions" id="manual-instructions">地図をクリックして出発地と目的地を順に指定してください</p>
+          <button id="manual-reset" type="button" class="secondary-action">手動指定をリセット</button>
         </div>
 
         <fieldset class="distance-ladder">
