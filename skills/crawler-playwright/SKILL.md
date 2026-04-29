@@ -1,3 +1,8 @@
+---
+name: crawler-playwright
+description: ride-oasis の店舗クローラを実装/更新するときに使用する。`scripts/*_pref_ndjson.js` を追加・改修する場合、新しいチェーンを追加する場合、サイト構造変更で既存スクレイパが壊れた場合、`raw.stores_scraped_*` のスキーマと NDJSON 出力を整える場合に利用する。API/JSON 取得を DOM 抽出より優先する方針を含む。
+---
+
 # Skill: crawler-playwright
 
 公式サイトの店舗情報を Playwright で安定的に収集し、`raw.stores_scraped_*` へ投入するための作業手順。

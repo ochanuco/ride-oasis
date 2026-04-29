@@ -1,3 +1,8 @@
+---
+name: dataform-modeling
+description: ride-oasis の Dataform 定義を追加/更新するときに使用する。`dataform/definitions/{raw,stg,mart,ops}/*.sqlx` を変更する場合、`supply_point_id = chain:store_id` の一意性を維持する場合、`stg` の最新化や `ops` の品質メトリクスを整備する場合に利用する。Dataform 内では外部 I/O や npm 実行を行わない原則を含む。
+---
+
 # Skill: dataform-modeling
 
 `raw` → `stg` → `mart` → `ops` を Dataform で整備するための作業手順。
