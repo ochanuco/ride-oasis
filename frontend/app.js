@@ -3,7 +3,9 @@ const API_BASE = window.RIDEOASIS_API_BASE || '/api';
 // The geo-search UI uses submit-only firing (Enter / search button) so a single
 // user-initiated request is sent per search. For higher volume or hosted use,
 // override this with a self-hosted Nominatim or proxy via window.RIDEOASIS_NOMINATIM_BASE.
-const NOMINATIM_BASE = window.RIDEOASIS_NOMINATIM_BASE || 'https://nominatim.openstreetmap.org/search';
+const PUBLIC_NOMINATIM_BASE = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_BASE = window.RIDEOASIS_NOMINATIM_BASE || PUBLIC_NOMINATIM_BASE;
+const NOMINATIM_PUBLIC_MIN_INTERVAL_MS = 1000;
 
 const PRECISE_POINT_LEVEL = 8;
 const DEFAULT_MIN_POINT_LEVEL = 3;
@@ -132,6 +134,7 @@ let latestRouteLoadToken = 0;
 let latestRefreshToken = 0;
 let geoSearchAbortController = null;
 let latestGeoSearchToken = 0;
+let lastGeoSearchRequestTs = 0;
 
 /** Returns the currently selected route source mode. */
 function selectedSourceMode() {
@@ -849,7 +852,17 @@ async function handleGeoSearchSubmit(event) {
     return;
   }
 
+  if (NOMINATIM_BASE === PUBLIC_NOMINATIM_BASE) {
+    const sinceLast = Date.now() - lastGeoSearchRequestTs;
+    if (sinceLast < NOMINATIM_PUBLIC_MIN_INTERVAL_MS) {
+      const waitSec = Math.ceil((NOMINATIM_PUBLIC_MIN_INTERVAL_MS - sinceLast) / 100) / 10;
+      setStatus(`連続検索を抑制中: ${waitSec}秒後に再試行してください`);
+      return;
+    }
+  }
+
   cancelPendingGeoSearch();
+  lastGeoSearchRequestTs = Date.now();
   const token = ++latestGeoSearchToken;
   try {
     const items = await fetchPlaces(query);
@@ -911,6 +924,7 @@ function bindEvents() {
     )) {
       return;
     }
+    cancelPendingGeoSearch();
     clearGeoSearchResults();
   });
   elements.pointList.addEventListener('mouseover', (event) => {
