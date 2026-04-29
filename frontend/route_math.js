@@ -124,10 +124,38 @@
     ];
   }
 
+  /** Computes the initial bearing in degrees [0, 360) from one lon/lat point to another. */
+  function bearingDegrees(from, to) {
+    if (
+      !Array.isArray(from) || from.length < 2 || !Number.isFinite(from[0]) || !Number.isFinite(from[1]) ||
+      !Array.isArray(to) || to.length < 2 || !Number.isFinite(to[0]) || !Number.isFinite(to[1])
+    ) {
+      return null;
+    }
+    const φ1 = toRadians(from[1]);
+    const φ2 = toRadians(to[1]);
+    const Δλ = toRadians(to[0] - from[0]);
+    const x = Math.sin(Δλ) * Math.cos(φ2);
+    const y = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    const θ = Math.atan2(x, y);
+    return ((θ * 180) / Math.PI + 360) % 360;
+  }
+
+  /** Returns true if `target` bearing is within ±halfConeDeg of `heading` bearing. */
+  function isWithinHeadingDeg(heading, target, halfConeDeg) {
+    if (!Number.isFinite(heading) || !Number.isFinite(target) || !Number.isFinite(halfConeDeg)) {
+      return false;
+    }
+    const diff = (((target - heading) + 540) % 360) - 180;
+    return Math.abs(diff) <= halfConeDeg;
+  }
+
   return {
     computeBbox,
     expandBbox,
     pointToPointDistanceMeters,
-    pointToRouteDistanceMeters
+    pointToRouteDistanceMeters,
+    bearingDegrees,
+    isWithinHeadingDeg
   };
 });

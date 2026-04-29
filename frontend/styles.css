@@ -141,6 +141,26 @@ body {
   justify-content: center;
 }
 
+.current-location-controls {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.follow-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.follow-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
 .source-panel.inactive {
   opacity: 0.5;
 }
