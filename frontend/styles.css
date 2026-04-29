@@ -116,11 +116,20 @@ body {
   border-color: var(--accent);
 }
 
+.geo-search-submit,
 .geo-search-clear {
   flex-shrink: 0;
-  padding: 4px 10px;
-  font-size: 14px;
+  padding: 4px 12px;
   min-height: 32px;
+}
+
+.geo-search-submit {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.geo-search-clear {
+  font-size: 14px;
 }
 
 .geo-search-results {

@@ -21,11 +21,12 @@
       </header>
 
       <section class="panel geo-search-panel">
-        <div class="geo-search">
+        <form class="geo-search" id="geo-search-form" autocomplete="off">
           <label class="geo-search-label" for="geo-search-input">地名で検索</label>
-          <input id="geo-search-input" type="search" placeholder="例: 箱根、富士河口湖、千葉県柏市" autocomplete="off" />
+          <input id="geo-search-input" type="search" placeholder="例: 箱根、富士河口湖、千葉県柏市" autocomplete="off" enterkeyhint="search" />
+          <button type="submit" id="geo-search-submit" class="geo-search-submit">検索</button>
           <button id="geo-search-clear" type="button" class="geo-search-clear" hidden aria-label="検索語を消す">×</button>
-        </div>
+        </form>
         <ul id="geo-search-results" class="geo-search-results" hidden></ul>
       </section>
 

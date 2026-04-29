@@ -1,10 +1,13 @@
 const API_BASE = window.RIDEOASIS_API_BASE || '/api';
+// Public Nominatim forbids client-side autocomplete and limits usage to ~1 req/s.
+// The geo-search UI uses submit-only firing (Enter / search button) so a single
+// user-initiated request is sent per search. For higher volume or hosted use,
+// override this with a self-hosted Nominatim or proxy via window.RIDEOASIS_NOMINATIM_BASE.
 const NOMINATIM_BASE = window.RIDEOASIS_NOMINATIM_BASE || 'https://nominatim.openstreetmap.org/search';
 
 const PRECISE_POINT_LEVEL = 8;
 const DEFAULT_MIN_POINT_LEVEL = 3;
 const DISTANCE_OPTIONS = [100, 250, 500, 1000, 2000, 5000, 10000];
-const GEO_SEARCH_DEBOUNCE_MS = 400;
 const GEO_SEARCH_MIN_QUERY = 2;
 const GEO_SEARCH_LIMIT = 5;
 
@@ -25,7 +28,9 @@ const elements = {
   popup: document.getElementById('popup'),
   popupBody: document.getElementById('popup-body'),
   popupClose: document.getElementById('popup-close'),
+  geoSearchForm: document.getElementById('geo-search-form'),
   geoSearchInput: document.getElementById('geo-search-input'),
+  geoSearchSubmit: document.getElementById('geo-search-submit'),
   geoSearchClear: document.getElementById('geo-search-clear'),
   geoSearchResults: document.getElementById('geo-search-results')
 };
@@ -125,7 +130,6 @@ const API_PAGE_LIMIT = 10000;
 const featureIndex = new Map();
 let latestRouteLoadToken = 0;
 let latestRefreshToken = 0;
-let geoSearchDebounceTimer = null;
 let geoSearchAbortController = null;
 let latestGeoSearchToken = 0;
 
@@ -773,8 +777,18 @@ async function fetchPlaces(query) {
   return response.json();
 }
 
+/** Cancels any in-flight geo-search request and invalidates pending response tokens. */
+function cancelPendingGeoSearch() {
+  latestGeoSearchToken += 1;
+  if (geoSearchAbortController) {
+    geoSearchAbortController.abort();
+    geoSearchAbortController = null;
+  }
+}
+
 /** Fits the map view to a Nominatim place's bounding box. */
 function fitMapToPlace(item) {
+  cancelPendingGeoSearch();
   const bbox = Array.isArray(item.boundingbox) ? item.boundingbox.map(Number) : null;
   if (!bbox || bbox.length !== 4 || !bbox.every(Number.isFinite)) {
     return;
@@ -794,6 +808,9 @@ async function searchAtPlace(item) {
   const lat = Number(item.lat);
   const lon = Number(item.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+  cancelPendingGeoSearch();
+  manualPoints = [];
 
   const currentRadio = document.querySelector('input[name="source-mode"][value="current"]');
   if (currentRadio) {
@@ -816,47 +833,41 @@ async function searchAtPlace(item) {
   await refreshMap([...routeCoordinates]);
 }
 
-/** Debounced query handler that triggers Nominatim and renders results. */
+/** Updates clear-button visibility on input change. Submission is explicit (Enter / button). */
 function handleGeoSearchInput() {
   const query = elements.geoSearchInput.value.trim();
   elements.geoSearchClear.hidden = query.length === 0;
+}
 
-  if (geoSearchDebounceTimer) {
-    clearTimeout(geoSearchDebounceTimer);
-    geoSearchDebounceTimer = null;
-  }
-  const token = ++latestGeoSearchToken;
-
+/** Submit-only Nominatim search triggered by Enter key or the search button. */
+async function handleGeoSearchSubmit(event) {
+  event.preventDefault();
+  const query = elements.geoSearchInput.value.trim();
   if (query.length < GEO_SEARCH_MIN_QUERY) {
-    if (geoSearchAbortController) geoSearchAbortController.abort();
+    cancelPendingGeoSearch();
     clearGeoSearchResults();
     return;
   }
 
-  geoSearchDebounceTimer = setTimeout(async () => {
-    try {
-      const items = await fetchPlaces(query);
-      if (token !== latestGeoSearchToken) return;
-      renderGeoSearchResults(items);
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      if (token !== latestGeoSearchToken) return;
-      console.error(error);
-      clearGeoSearchResults();
-    }
-  }, GEO_SEARCH_DEBOUNCE_MS);
+  cancelPendingGeoSearch();
+  const token = ++latestGeoSearchToken;
+  try {
+    const items = await fetchPlaces(query);
+    if (token !== latestGeoSearchToken) return;
+    renderGeoSearchResults(items);
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    if (token !== latestGeoSearchToken) return;
+    console.error(error);
+    clearGeoSearchResults();
+  }
 }
 
 /** Clears the search box and hides results. */
 function handleGeoSearchClear() {
   elements.geoSearchInput.value = '';
   elements.geoSearchClear.hidden = true;
-  latestGeoSearchToken += 1;
-  if (geoSearchDebounceTimer) {
-    clearTimeout(geoSearchDebounceTimer);
-    geoSearchDebounceTimer = null;
-  }
-  if (geoSearchAbortController) geoSearchAbortController.abort();
+  cancelPendingGeoSearch();
   clearGeoSearchResults();
   elements.geoSearchInput.focus();
 }
@@ -888,6 +899,7 @@ function bindEvents() {
   elements.gpxFile.addEventListener('change', handleGpxFile);
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
   elements.manualReset.addEventListener('click', resetManualState);
+  elements.geoSearchForm.addEventListener('submit', handleGeoSearchSubmit);
   elements.geoSearchInput.addEventListener('input', handleGeoSearchInput);
   elements.geoSearchClear.addEventListener('click', handleGeoSearchClear);
   document.addEventListener('click', (event) => {
