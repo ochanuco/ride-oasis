@@ -1,4 +1,11 @@
 const API_BASE = window.RIDEOASIS_API_BASE || '/api';
+// Public Nominatim forbids client-side autocomplete and limits usage to ~1 req/s.
+// The geo-search UI uses submit-only firing (Enter / search button) so a single
+// user-initiated request is sent per search. For higher volume or hosted use,
+// override this with a self-hosted Nominatim or proxy via window.RIDEOASIS_NOMINATIM_BASE.
+const PUBLIC_NOMINATIM_BASE = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_BASE = window.RIDEOASIS_NOMINATIM_BASE || PUBLIC_NOMINATIM_BASE;
+const NOMINATIM_PUBLIC_MIN_INTERVAL_MS = 1000;
 
 const PRECISE_POINT_LEVEL = 8;
 const DEFAULT_MIN_POINT_LEVEL = 3;
@@ -6,6 +13,8 @@ const DISTANCE_OPTIONS = [100, 250, 500, 1000, 2000, 5000, 10000];
 const FOLLOW_MIN_REFRESH_INTERVAL_MS = 30000;
 const FOLLOW_FORWARD_HALF_CONE_DEG = 90;
 const FOLLOW_BEARING_MIN_MOVEMENT_M = 5;
+const GEO_SEARCH_MIN_QUERY = 2;
+const GEO_SEARCH_LIMIT = 5;
 
 const elements = {
   status: document.getElementById('status'),
@@ -24,7 +33,12 @@ const elements = {
   popup: document.getElementById('popup'),
   popupBody: document.getElementById('popup-body'),
   popupClose: document.getElementById('popup-close'),
-  followToggle: document.getElementById('follow-toggle')
+  followToggle: document.getElementById('follow-toggle'),
+  geoSearchForm: document.getElementById('geo-search-form'),
+  geoSearchInput: document.getElementById('geo-search-input'),
+  geoSearchSubmit: document.getElementById('geo-search-submit'),
+  geoSearchClear: document.getElementById('geo-search-clear'),
+  geoSearchResults: document.getElementById('geo-search-results')
 };
 
 const routeGeoJsonFormat = new ol.format.GeoJSON({ featureProjection: 'EPSG:3857' });
@@ -130,6 +144,9 @@ let followWatchId = null;
 let followLastCoord = null;
 let followBearingDeg = null;
 let followLastRefreshAt = 0;
+let geoSearchAbortController = null;
+let latestGeoSearchToken = 0;
+let lastGeoSearchRequestTs = 0;
 
 /** Returns the currently selected route source mode. */
 function selectedSourceMode() {
@@ -814,6 +831,182 @@ async function handleFollowToggle() {
   }
 }
 
+/** Empties the geo-search dropdown and hides it. */
+function clearGeoSearchResults() {
+  elements.geoSearchResults.innerHTML = '';
+  elements.geoSearchResults.hidden = true;
+}
+
+/** Renders Nominatim search results into the dropdown with two actions per row. */
+function renderGeoSearchResults(items) {
+  elements.geoSearchResults.innerHTML = '';
+  if (!items.length) {
+    const empty = document.createElement('li');
+    empty.className = 'geo-search-empty';
+    empty.textContent = '該当する地名が見つかりません';
+    elements.geoSearchResults.appendChild(empty);
+    elements.geoSearchResults.hidden = false;
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.className = 'geo-search-result';
+
+    const name = document.createElement('span');
+    name.className = 'geo-search-result-name';
+    name.textContent = item.display_name;
+
+    const actions = document.createElement('div');
+    actions.className = 'geo-search-result-actions';
+
+    const fitBtn = document.createElement('button');
+    fitBtn.type = 'button';
+    fitBtn.className = 'geo-search-result-fit';
+    fitBtn.textContent = 'この場所を表示';
+    fitBtn.addEventListener('click', () => fitMapToPlace(item));
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.className = 'geo-search-result-search';
+    searchBtn.textContent = 'ここで検索';
+    searchBtn.addEventListener('click', () => searchAtPlace(item));
+
+    actions.append(fitBtn, searchBtn);
+    li.append(name, actions);
+    elements.geoSearchResults.appendChild(li);
+  }
+  elements.geoSearchResults.hidden = false;
+}
+
+/** Calls Nominatim and returns up to GEO_SEARCH_LIMIT places matching the query. */
+async function fetchPlaces(query) {
+  if (geoSearchAbortController) {
+    geoSearchAbortController.abort();
+  }
+  geoSearchAbortController = new AbortController();
+  const params = new URLSearchParams({
+    q: query,
+    format: 'json',
+    countrycodes: 'jp',
+    'accept-language': 'ja',
+    limit: String(GEO_SEARCH_LIMIT),
+    addressdetails: '0'
+  });
+  const response = await fetch(`${NOMINATIM_BASE}?${params.toString()}`, {
+    signal: geoSearchAbortController.signal,
+    headers: { Accept: 'application/json' }
+  });
+  if (!response.ok) {
+    throw new Error(`Nominatim error (${response.status})`);
+  }
+  return response.json();
+}
+
+/** Cancels any in-flight geo-search request and invalidates pending response tokens. */
+function cancelPendingGeoSearch() {
+  latestGeoSearchToken += 1;
+  if (geoSearchAbortController) {
+    geoSearchAbortController.abort();
+    geoSearchAbortController = null;
+  }
+}
+
+/** Fits the map view to a Nominatim place's bounding box. */
+function fitMapToPlace(item) {
+  cancelPendingGeoSearch();
+  const bbox = Array.isArray(item.boundingbox) ? item.boundingbox.map(Number) : null;
+  if (!bbox || bbox.length !== 4 || !bbox.every(Number.isFinite)) {
+    return;
+  }
+  const [minLat, maxLat, minLon, maxLon] = bbox;
+  const extent = ol.proj.transformExtent(
+    [minLon, minLat, maxLon, maxLat],
+    'EPSG:4326',
+    'EPSG:3857'
+  );
+  map.getView().fit(extent, { padding: [40, 40, 40, 40], duration: 250, maxZoom: 14 });
+  clearGeoSearchResults();
+}
+
+/** Uses a Nominatim place as the current-location anchor and runs nearby search. */
+async function searchAtPlace(item) {
+  const lat = Number(item.lat);
+  const lon = Number(item.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+  cancelPendingGeoSearch();
+  manualPoints = [];
+
+  const currentRadio = document.querySelector('input[name="source-mode"][value="current"]');
+  if (currentRadio) {
+    currentRadio.checked = true;
+    syncSourceModeUi();
+  }
+
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  if (loadToken !== latestRouteLoadToken) return;
+  const coord = [lon, lat];
+  routeFeature = null;
+  routeCoordinates = [coord];
+  renderCurrentLocation(coord);
+  resetResults();
+  updateRoutePointCount();
+  fitToVisibleData();
+  setStatus(`「${item.display_name}」を中心に検索中...`);
+  clearGeoSearchResults();
+  await refreshMap([...routeCoordinates]);
+}
+
+/** Updates clear-button visibility on input change. Submission is explicit (Enter / button). */
+function handleGeoSearchInput() {
+  const query = elements.geoSearchInput.value.trim();
+  elements.geoSearchClear.hidden = query.length === 0;
+}
+
+/** Submit-only Nominatim search triggered by Enter key or the search button. */
+async function handleGeoSearchSubmit(event) {
+  event.preventDefault();
+  const query = elements.geoSearchInput.value.trim();
+  if (query.length < GEO_SEARCH_MIN_QUERY) {
+    cancelPendingGeoSearch();
+    clearGeoSearchResults();
+    return;
+  }
+
+  if (NOMINATIM_BASE === PUBLIC_NOMINATIM_BASE) {
+    const sinceLast = Date.now() - lastGeoSearchRequestTs;
+    if (sinceLast < NOMINATIM_PUBLIC_MIN_INTERVAL_MS) {
+      const waitSec = Math.ceil((NOMINATIM_PUBLIC_MIN_INTERVAL_MS - sinceLast) / 100) / 10;
+      setStatus(`連続検索を抑制中: ${waitSec}秒後に再試行してください`);
+      return;
+    }
+  }
+
+  cancelPendingGeoSearch();
+  lastGeoSearchRequestTs = Date.now();
+  const token = ++latestGeoSearchToken;
+  try {
+    const items = await fetchPlaces(query);
+    if (token !== latestGeoSearchToken) return;
+    renderGeoSearchResults(items);
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    if (token !== latestGeoSearchToken) return;
+    console.error(error);
+    clearGeoSearchResults();
+  }
+}
+
+/** Clears the search box and hides results. */
+function handleGeoSearchClear() {
+  elements.geoSearchInput.value = '';
+  elements.geoSearchClear.hidden = true;
+  cancelPendingGeoSearch();
+  clearGeoSearchResults();
+  elements.geoSearchInput.focus();
+}
+
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   for (const input of document.querySelectorAll('input[name="source-mode"]')) {
@@ -846,6 +1039,21 @@ function bindEvents() {
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
   elements.followToggle.addEventListener('change', handleFollowToggle);
   elements.manualReset.addEventListener('click', resetManualState);
+  elements.geoSearchForm.addEventListener('submit', handleGeoSearchSubmit);
+  elements.geoSearchInput.addEventListener('input', handleGeoSearchInput);
+  elements.geoSearchClear.addEventListener('click', handleGeoSearchClear);
+  document.addEventListener('click', (event) => {
+    if (elements.geoSearchResults.hidden) return;
+    const target = event.target;
+    if (target instanceof Node && (
+      elements.geoSearchResults.contains(target) ||
+      elements.geoSearchInput.contains(target)
+    )) {
+      return;
+    }
+    cancelPendingGeoSearch();
+    clearGeoSearchResults();
+  });
   elements.pointList.addEventListener('mouseover', (event) => {
     const item = findPointListItem(event.target);
     if (!item || item === findPointListItem(event.relatedTarget)) return;
