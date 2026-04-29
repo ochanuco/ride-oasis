@@ -118,6 +118,10 @@ test('Route Math: 不正な座標の方位は null を返す', () => {
   assert.equal(bearingDegrees([Number.NaN, 35.0], [139.0, 35.0]), null);
 });
 
+test('Route Math: 同一地点の方位は 0 を返す', () => {
+  assert.equal(bearingDegrees([139.0, 35.0], [139.0, 35.0]), 0);
+});
+
 test('Route Math: ヘディング許容範囲内なら true', () => {
   assert.equal(isWithinHeadingDeg(0, 45, 90), true);
   assert.equal(isWithinHeadingDeg(0, 90, 90), true);
