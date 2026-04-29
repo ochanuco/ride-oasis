@@ -722,6 +722,7 @@ async function searchAtPlace(item) {
 
   const loadToken = ++latestRouteLoadToken;
   cancelPendingRefreshes();
+  if (loadToken !== latestRouteLoadToken) return;
   const coord = [lon, lat];
   routeFeature = null;
   routeCoordinates = [coord];
@@ -731,7 +732,6 @@ async function searchAtPlace(item) {
   fitToVisibleData();
   setStatus(`「${item.display_name}」を中心に検索中...`);
   clearGeoSearchResults();
-  if (loadToken !== latestRouteLoadToken) return;
   await refreshMap([...routeCoordinates]);
 }
 
