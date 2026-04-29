@@ -696,7 +696,16 @@ async function handleCurrentLocation() {
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   for (const input of document.querySelectorAll('input[name="source-mode"]')) {
-    input.addEventListener('change', syncSourceModeUi);
+    input.addEventListener('change', () => {
+      const mode = selectedSourceMode();
+      if (mode !== 'manual' && manualPoints.length > 0) {
+        resetManualState();
+      }
+      syncSourceModeUi();
+      if (mode === 'manual' && manualPoints.length === 0 && routeCoordinates.length === 0) {
+        setStatus('地図をクリックして出発地を指定してください');
+      }
+    });
   }
   elements.distanceThreshold.addEventListener('input', syncDistanceUi);
   elements.distanceThreshold.addEventListener('change', () => {
