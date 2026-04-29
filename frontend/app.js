@@ -10,6 +10,9 @@ const NOMINATIM_PUBLIC_MIN_INTERVAL_MS = 1000;
 const PRECISE_POINT_LEVEL = 8;
 const DEFAULT_MIN_POINT_LEVEL = 3;
 const DISTANCE_OPTIONS = [100, 250, 500, 1000, 2000, 5000, 10000];
+const FOLLOW_MIN_REFRESH_INTERVAL_MS = 30000;
+const FOLLOW_FORWARD_HALF_CONE_DEG = 90;
+const FOLLOW_BEARING_MIN_MOVEMENT_M = 5;
 const GEO_SEARCH_MIN_QUERY = 2;
 const GEO_SEARCH_LIMIT = 5;
 
@@ -30,6 +33,7 @@ const elements = {
   popup: document.getElementById('popup'),
   popupBody: document.getElementById('popup-body'),
   popupClose: document.getElementById('popup-close'),
+  followToggle: document.getElementById('follow-toggle'),
   geoSearchForm: document.getElementById('geo-search-form'),
   geoSearchInput: document.getElementById('geo-search-input'),
   geoSearchSubmit: document.getElementById('geo-search-submit'),
@@ -58,11 +62,15 @@ const pointLayer = new ol.layer.Vector({
   source: pointSource,
   style(feature) {
     const active = feature.get('active') === true;
+    const forward = feature.get('forward') === true;
+    const radius = active ? 8 : forward ? 7 : 6;
+    const fillColor = active ? '#9e3d22' : forward ? '#1f4f95' : '#12836b';
+    const strokeWidth = active || forward ? 2 : 1.5;
     return new ol.style.Style({
       image: new ol.style.Circle({
-        radius: active ? 8 : 6,
-        fill: new ol.style.Fill({ color: active ? '#9e3d22' : '#12836b' }),
-        stroke: new ol.style.Stroke({ color: '#ffffff', width: 1.5 })
+        radius,
+        fill: new ol.style.Fill({ color: fillColor }),
+        stroke: new ol.style.Stroke({ color: '#ffffff', width: strokeWidth })
       })
     });
   }
@@ -132,6 +140,10 @@ const API_PAGE_LIMIT = 10000;
 const featureIndex = new Map();
 let latestRouteLoadToken = 0;
 let latestRefreshToken = 0;
+let followWatchId = null;
+let followLastCoord = null;
+let followBearingDeg = null;
+let followLastRefreshAt = 0;
 let geoSearchAbortController = null;
 let latestGeoSearchToken = 0;
 let lastGeoSearchRequestTs = 0;
@@ -709,6 +721,124 @@ async function handleCurrentLocation() {
   }
 }
 
+/** Marks rendered point features that fall in the forward cone of the follow heading. */
+function applyForwardEmphasis() {
+  if (followBearingDeg === null || !followLastCoord) {
+    for (const feature of pointSource.getFeatures()) {
+      feature.set('forward', false);
+    }
+    return;
+  }
+  for (const feature of pointSource.getFeatures()) {
+    const lonLat = ol.proj.toLonLat(feature.getGeometry().getCoordinates());
+    const target = window.RouteMath.bearingDegrees(followLastCoord, lonLat);
+    const inFront = target !== null
+      ? window.RouteMath.isWithinHeadingDeg(followBearingDeg, target, FOLLOW_FORWARD_HALF_CONE_DEG)
+      : false;
+    feature.set('forward', inFront);
+  }
+}
+
+/** Handles a single follow-mode position update. */
+function handleFollowPosition(position) {
+  handleFollowPositionAsync(position).catch((error) => {
+    console.error('follow position handling error', error);
+  });
+}
+
+/** Returns true when follow mode is currently active (watch running and toggle on). */
+function isFollowActive() {
+  return followWatchId !== null && elements.followToggle.checked;
+}
+
+/** Async core for follow-mode position updates; called via the sync wrapper above. */
+async function handleFollowPositionAsync(position) {
+  if (!isFollowActive()) return;
+
+  const coord = [position.coords.longitude, position.coords.latitude];
+  if (followLastCoord) {
+    const distance = window.RouteMath.pointToPointDistanceMeters(followLastCoord, coord);
+    if (distance >= FOLLOW_BEARING_MIN_MOVEMENT_M) {
+      const bearing = window.RouteMath.bearingDegrees(followLastCoord, coord);
+      if (bearing !== null) followBearingDeg = bearing;
+    }
+  }
+  followLastCoord = coord;
+
+  routeFeature = null;
+  routeCoordinates = [coord];
+  renderCurrentLocation(coord);
+  updateRoutePointCount();
+
+  const now = Date.now();
+  const stale = now - followLastRefreshAt >= FOLLOW_MIN_REFRESH_INTERVAL_MS;
+  const firstFollowRefresh = followLastRefreshAt === 0;
+  if (stale || firstFollowRefresh) {
+    followLastRefreshAt = now;
+    await refreshMap([...routeCoordinates]);
+    if (!isFollowActive()) return;
+  }
+  applyForwardEmphasis();
+  const bearingLabel = followBearingDeg !== null ? `${Math.round(followBearingDeg)}°` : '方位推定中';
+  setStatus(`追従中 (${bearingLabel})`);
+}
+
+/** Handles a follow-mode geolocation error and stops the watch. */
+function handleFollowError(error) {
+  console.error('follow position error', error);
+  setStatus('追従モード: 位置情報の取得に失敗しました');
+  if (elements.followToggle.checked) {
+    elements.followToggle.checked = false;
+  }
+  stopFollowMode();
+}
+
+/** Starts watching the device position and switches to current-location mode. */
+async function startFollowMode() {
+  if (!navigator.geolocation) {
+    setStatus('このブラウザは現在地取得に対応していません');
+    elements.followToggle.checked = false;
+    return;
+  }
+  if (followWatchId !== null) return;
+
+  manualPoints = [];
+  const currentRadio = document.querySelector('input[name="source-mode"][value="current"]');
+  if (currentRadio && !currentRadio.checked) {
+    currentRadio.checked = true;
+    syncSourceModeUi();
+  }
+  followLastRefreshAt = 0;
+  setStatus('追従モード: 現在地を取得中...');
+  followWatchId = navigator.geolocation.watchPosition(
+    handleFollowPosition,
+    handleFollowError,
+    { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 }
+  );
+}
+
+/** Stops watching the device position and clears forward emphasis. */
+function stopFollowMode() {
+  if (followWatchId !== null) {
+    navigator.geolocation.clearWatch(followWatchId);
+    followWatchId = null;
+  }
+  followBearingDeg = null;
+  followLastCoord = null;
+  followLastRefreshAt = 0;
+  applyForwardEmphasis();
+}
+
+/** Toggle handler for the follow checkbox. */
+async function handleFollowToggle() {
+  if (elements.followToggle.checked) {
+    await startFollowMode();
+  } else {
+    stopFollowMode();
+    setStatus('追従モードを停止しました');
+  }
+}
+
 /** Empties the geo-search dropdown and hides it. */
 function clearGeoSearchResults() {
   elements.geoSearchResults.innerHTML = '';
@@ -893,6 +1023,10 @@ function bindEvents() {
       if (mode !== 'manual' && manualPoints.length > 0) {
         resetManualState();
       }
+      if (mode !== 'current' && elements.followToggle.checked) {
+        elements.followToggle.checked = false;
+        stopFollowMode();
+      }
       syncSourceModeUi();
       if (mode === 'manual' && manualPoints.length === 0 && routeCoordinates.length === 0) {
         setStatus('地図をクリックして出発地を指定してください');
@@ -911,6 +1045,7 @@ function bindEvents() {
   }
   elements.gpxFile.addEventListener('change', handleGpxFile);
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
+  elements.followToggle.addEventListener('change', handleFollowToggle);
   elements.manualReset.addEventListener('click', resetManualState);
   elements.geoSearchForm.addEventListener('submit', handleGeoSearchSubmit);
   elements.geoSearchInput.addEventListener('input', handleGeoSearchInput);

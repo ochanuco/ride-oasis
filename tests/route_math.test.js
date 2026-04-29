@@ -5,7 +5,9 @@ const {
   computeBbox,
   expandBbox,
   pointToPointDistanceMeters,
-  pointToRouteDistanceMeters
+  pointToRouteDistanceMeters,
+  bearingDegrees,
+  isWithinHeadingDeg
 } = require('../frontend/route_math');
 const { parseCoordinateTokens, parseGpxText } = require('../frontend/gpx');
 
@@ -89,4 +91,50 @@ test('Route Math: 単一点どうしの距離をメートル換算できる', ()
 test('Route Math: 非数値の座標は無限距離として扱う', () => {
   const distance = pointToPointDistanceMeters([139.0, Number.NaN], [139.001, 35.0]);
   assert.equal(distance, Number.POSITIVE_INFINITY);
+});
+
+test('Route Math: 真北は方位 0 度になる', () => {
+  const bearing = bearingDegrees([139.0, 35.0], [139.0, 35.1]);
+  assert.ok(bearing >= 359 || bearing <= 1, `expected ~0, got ${bearing}`);
+});
+
+test('Route Math: 真東は方位 90 度になる', () => {
+  const bearing = bearingDegrees([139.0, 35.0], [139.1, 35.0]);
+  assert.ok(bearing > 89 && bearing < 91, `expected ~90, got ${bearing}`);
+});
+
+test('Route Math: 真南は方位 180 度になる', () => {
+  const bearing = bearingDegrees([139.0, 35.1], [139.0, 35.0]);
+  assert.ok(bearing > 179 && bearing < 181, `expected ~180, got ${bearing}`);
+});
+
+test('Route Math: 真西は方位 270 度になる', () => {
+  const bearing = bearingDegrees([139.1, 35.0], [139.0, 35.0]);
+  assert.ok(bearing > 269 && bearing < 271, `expected ~270, got ${bearing}`);
+});
+
+test('Route Math: 不正な座標の方位は null を返す', () => {
+  assert.equal(bearingDegrees(null, [139.0, 35.0]), null);
+  assert.equal(bearingDegrees([Number.NaN, 35.0], [139.0, 35.0]), null);
+});
+
+test('Route Math: 同一地点の方位は 0 を返す', () => {
+  assert.equal(bearingDegrees([139.0, 35.0], [139.0, 35.0]), 0);
+});
+
+test('Route Math: ヘディング許容範囲内なら true', () => {
+  assert.equal(isWithinHeadingDeg(0, 45, 90), true);
+  assert.equal(isWithinHeadingDeg(0, 90, 90), true);
+  assert.equal(isWithinHeadingDeg(0, 91, 90), false);
+});
+
+test('Route Math: ヘディングは 360 度ラップを正しく扱う', () => {
+  assert.equal(isWithinHeadingDeg(350, 10, 30), true);
+  assert.equal(isWithinHeadingDeg(10, 350, 30), true);
+  assert.equal(isWithinHeadingDeg(0, 180, 90), false);
+});
+
+test('Route Math: 不正なヘディング入力は false を返す', () => {
+  assert.equal(isWithinHeadingDeg(Number.NaN, 90, 90), false);
+  assert.equal(isWithinHeadingDeg(0, Number.NaN, 90), false);
 });

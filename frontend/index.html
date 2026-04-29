@@ -50,7 +50,13 @@
         </div>
 
         <div class="source-panel" id="current-location-panel">
-          <button id="use-current-location" type="button" class="secondary-action">現在地を使う</button>
+          <div class="current-location-controls">
+            <button id="use-current-location" type="button" class="secondary-action">現在地を使う</button>
+            <label class="follow-toggle">
+              <input id="follow-toggle" type="checkbox" />
+              <span>追従モード (走行中の自動更新)</span>
+            </label>
+          </div>
         </div>
 
         <div class="source-panel" id="manual-panel">
