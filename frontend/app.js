@@ -1,8 +1,12 @@
 const API_BASE = window.RIDEOASIS_API_BASE || '/api';
+const NOMINATIM_BASE = window.RIDEOASIS_NOMINATIM_BASE || 'https://nominatim.openstreetmap.org/search';
 
 const PRECISE_POINT_LEVEL = 8;
 const DEFAULT_MIN_POINT_LEVEL = 3;
 const DISTANCE_OPTIONS = [100, 250, 500, 1000, 2000, 5000, 10000];
+const GEO_SEARCH_DEBOUNCE_MS = 400;
+const GEO_SEARCH_MIN_QUERY = 2;
+const GEO_SEARCH_LIMIT = 5;
 
 const elements = {
   status: document.getElementById('status'),
@@ -18,7 +22,10 @@ const elements = {
   matchedCount: document.getElementById('matched-count'),
   popup: document.getElementById('popup'),
   popupBody: document.getElementById('popup-body'),
-  popupClose: document.getElementById('popup-close')
+  popupClose: document.getElementById('popup-close'),
+  geoSearchInput: document.getElementById('geo-search-input'),
+  geoSearchClear: document.getElementById('geo-search-clear'),
+  geoSearchResults: document.getElementById('geo-search-results')
 };
 
 const routeGeoJsonFormat = new ol.format.GeoJSON({ featureProjection: 'EPSG:3857' });
@@ -115,6 +122,9 @@ const API_PAGE_LIMIT = 10000;
 const featureIndex = new Map();
 let latestRouteLoadToken = 0;
 let latestRefreshToken = 0;
+let geoSearchDebounceTimer = null;
+let geoSearchAbortController = null;
+let latestGeoSearchToken = 0;
 
 /** Returns the currently selected route source mode. */
 function selectedSourceMode() {
@@ -611,6 +621,160 @@ async function handleCurrentLocation() {
   }
 }
 
+/** Empties the geo-search dropdown and hides it. */
+function clearGeoSearchResults() {
+  elements.geoSearchResults.innerHTML = '';
+  elements.geoSearchResults.hidden = true;
+}
+
+/** Renders Nominatim search results into the dropdown with two actions per row. */
+function renderGeoSearchResults(items) {
+  elements.geoSearchResults.innerHTML = '';
+  if (!items.length) {
+    const empty = document.createElement('li');
+    empty.className = 'geo-search-empty';
+    empty.textContent = '該当する地名が見つかりません';
+    elements.geoSearchResults.appendChild(empty);
+    elements.geoSearchResults.hidden = false;
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.className = 'geo-search-result';
+
+    const name = document.createElement('span');
+    name.className = 'geo-search-result-name';
+    name.textContent = item.display_name;
+
+    const actions = document.createElement('div');
+    actions.className = 'geo-search-result-actions';
+
+    const fitBtn = document.createElement('button');
+    fitBtn.type = 'button';
+    fitBtn.className = 'geo-search-result-fit';
+    fitBtn.textContent = 'この場所を表示';
+    fitBtn.addEventListener('click', () => fitMapToPlace(item));
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.className = 'geo-search-result-search';
+    searchBtn.textContent = 'ここで検索';
+    searchBtn.addEventListener('click', () => searchAtPlace(item));
+
+    actions.append(fitBtn, searchBtn);
+    li.append(name, actions);
+    elements.geoSearchResults.appendChild(li);
+  }
+  elements.geoSearchResults.hidden = false;
+}
+
+/** Calls Nominatim and returns up to GEO_SEARCH_LIMIT places matching the query. */
+async function fetchPlaces(query) {
+  if (geoSearchAbortController) {
+    geoSearchAbortController.abort();
+  }
+  geoSearchAbortController = new AbortController();
+  const params = new URLSearchParams({
+    q: query,
+    format: 'json',
+    countrycodes: 'jp',
+    'accept-language': 'ja',
+    limit: String(GEO_SEARCH_LIMIT),
+    addressdetails: '0'
+  });
+  const response = await fetch(`${NOMINATIM_BASE}?${params.toString()}`, {
+    signal: geoSearchAbortController.signal,
+    headers: { Accept: 'application/json' }
+  });
+  if (!response.ok) {
+    throw new Error(`Nominatim error (${response.status})`);
+  }
+  return response.json();
+}
+
+/** Fits the map view to a Nominatim place's bounding box. */
+function fitMapToPlace(item) {
+  const bbox = Array.isArray(item.boundingbox) ? item.boundingbox.map(Number) : null;
+  if (!bbox || bbox.length !== 4 || !bbox.every(Number.isFinite)) {
+    return;
+  }
+  const [minLat, maxLat, minLon, maxLon] = bbox;
+  const extent = ol.proj.transformExtent(
+    [minLon, minLat, maxLon, maxLat],
+    'EPSG:4326',
+    'EPSG:3857'
+  );
+  map.getView().fit(extent, { padding: [40, 40, 40, 40], duration: 250, maxZoom: 14 });
+  clearGeoSearchResults();
+}
+
+/** Uses a Nominatim place as the current-location anchor and runs nearby search. */
+async function searchAtPlace(item) {
+  const lat = Number(item.lat);
+  const lon = Number(item.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+  const currentRadio = document.querySelector('input[name="source-mode"][value="current"]');
+  if (currentRadio) {
+    currentRadio.checked = true;
+    syncSourceModeUi();
+  }
+
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  const coord = [lon, lat];
+  routeFeature = null;
+  routeCoordinates = [coord];
+  renderCurrentLocation(coord);
+  resetResults();
+  updateRoutePointCount();
+  fitToVisibleData();
+  setStatus(`「${item.display_name}」を中心に検索中...`);
+  clearGeoSearchResults();
+  if (loadToken !== latestRouteLoadToken) return;
+  await refreshMap([...routeCoordinates]);
+}
+
+/** Debounced query handler that triggers Nominatim and renders results. */
+function handleGeoSearchInput() {
+  const query = elements.geoSearchInput.value.trim();
+  elements.geoSearchClear.hidden = query.length === 0;
+
+  if (geoSearchDebounceTimer) {
+    clearTimeout(geoSearchDebounceTimer);
+    geoSearchDebounceTimer = null;
+  }
+
+  if (query.length < GEO_SEARCH_MIN_QUERY) {
+    if (geoSearchAbortController) geoSearchAbortController.abort();
+    clearGeoSearchResults();
+    return;
+  }
+
+  const token = ++latestGeoSearchToken;
+  geoSearchDebounceTimer = setTimeout(async () => {
+    try {
+      const items = await fetchPlaces(query);
+      if (token !== latestGeoSearchToken) return;
+      renderGeoSearchResults(items);
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      if (token !== latestGeoSearchToken) return;
+      console.error(error);
+      clearGeoSearchResults();
+    }
+  }, GEO_SEARCH_DEBOUNCE_MS);
+}
+
+/** Clears the search box and hides results. */
+function handleGeoSearchClear() {
+  elements.geoSearchInput.value = '';
+  elements.geoSearchClear.hidden = true;
+  if (geoSearchAbortController) geoSearchAbortController.abort();
+  clearGeoSearchResults();
+  elements.geoSearchInput.focus();
+}
+
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   for (const input of document.querySelectorAll('input[name="source-mode"]')) {
@@ -628,6 +792,19 @@ function bindEvents() {
   }
   elements.gpxFile.addEventListener('change', handleGpxFile);
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
+  elements.geoSearchInput.addEventListener('input', handleGeoSearchInput);
+  elements.geoSearchClear.addEventListener('click', handleGeoSearchClear);
+  document.addEventListener('click', (event) => {
+    if (elements.geoSearchResults.hidden) return;
+    const target = event.target;
+    if (target instanceof Node && (
+      elements.geoSearchResults.contains(target) ||
+      elements.geoSearchInput.contains(target)
+    )) {
+      return;
+    }
+    clearGeoSearchResults();
+  });
   elements.pointList.addEventListener('mouseover', (event) => {
     const item = findPointListItem(event.target);
     if (!item || item === findPointListItem(event.relatedTarget)) return;
