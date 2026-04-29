@@ -343,11 +343,16 @@ function updateSummary(visibleCount) {
   elements.matchedCount.textContent = String(visibleCount);
 }
 
-/** Renders the uploaded route and its start/end markers. */
-function renderRoute(feature) {
+/** Clears the three drawing sources used for route and location visuals. */
+function clearRouteVisualSources() {
   routeSource.clear();
   endpointSource.clear();
   currentLocationSource.clear();
+}
+
+/** Renders the uploaded route and its start/end markers. */
+function renderRoute(feature) {
+  clearRouteVisualSources();
   routeSource.addFeature(feature);
 
   const coordinates = feature.getGeometry().getCoordinates();
@@ -362,9 +367,7 @@ function renderRoute(feature) {
 
 /** Renders manual-mode endpoints and the connecting straight LineString. */
 function renderManualPoints() {
-  routeSource.clear();
-  endpointSource.clear();
-  currentLocationSource.clear();
+  clearRouteVisualSources();
 
   if (manualPoints.length === 0) return;
 
@@ -390,9 +393,7 @@ function renderManualPoints() {
 
 /** Renders a single current-location marker instead of a route line. */
 function renderCurrentLocation(coord) {
-  routeSource.clear();
-  endpointSource.clear();
-  currentLocationSource.clear();
+  clearRouteVisualSources();
   currentLocationSource.addFeature(
     new ol.Feature({
       geometry: new ol.geom.Point(ol.proj.fromLonLat(coord))
@@ -642,9 +643,7 @@ function resetManualState() {
   routeCoordinates = [];
   ++latestRouteLoadToken;
   cancelPendingRefreshes();
-  routeSource.clear();
-  endpointSource.clear();
-  currentLocationSource.clear();
+  clearRouteVisualSources();
   resetResults();
   updateRoutePointCount();
   if (selectedSourceMode() === 'manual') {
