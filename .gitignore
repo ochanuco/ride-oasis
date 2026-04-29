@@ -9,3 +9,7 @@ playwright-report/
 test-results/
 data/
 .local/
+
+# .claude is ignored by ~/.config/git/ignore — re-allow shared Claude Code config
+!.claude/
+.claude/settings.local.json
