@@ -10,6 +10,8 @@ const elements = {
   useCurrentLocation: document.getElementById('use-current-location'),
   gpxPanel: document.getElementById('gpx-panel'),
   currentLocationPanel: document.getElementById('current-location-panel'),
+  manualPanel: document.getElementById('manual-panel'),
+  manualReset: document.getElementById('manual-reset'),
   gpxFileName: document.getElementById('gpx-file-name'),
   routePointCount: document.getElementById('route-point-count'),
   distanceThreshold: document.getElementById('distance-threshold'),
@@ -107,6 +109,7 @@ map.addOverlay(popupOverlay);
 
 let routeFeature = null;
 let routeCoordinates = [];
+let manualPoints = [];
 let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
@@ -165,11 +168,13 @@ function setStatus(message) {
 
 /** Syncs source-mode panel state so only one input path is active at a time. */
 function syncSourceModeUi() {
-  const gpxActive = selectedSourceMode() === 'gpx';
-  elements.gpxFile.disabled = !gpxActive;
-  elements.useCurrentLocation.disabled = gpxActive;
-  elements.gpxPanel.classList.toggle('inactive', !gpxActive);
-  elements.currentLocationPanel.classList.toggle('inactive', gpxActive);
+  const mode = selectedSourceMode();
+  elements.gpxFile.disabled = mode !== 'gpx';
+  elements.useCurrentLocation.disabled = mode !== 'current';
+  elements.manualReset.disabled = mode !== 'manual';
+  elements.gpxPanel.classList.toggle('inactive', mode !== 'gpx');
+  elements.currentLocationPanel.classList.toggle('inactive', mode !== 'current');
+  elements.manualPanel.classList.toggle('inactive', mode !== 'manual');
 }
 
 /** Resets visible and cached result points before a new search. */
@@ -352,6 +357,34 @@ function renderRoute(feature) {
     const goal = new ol.Feature({ geometry: new ol.geom.Point(coordinates[coordinates.length - 1]) });
     goal.set('kind', 'goal');
     endpointSource.addFeatures([start, goal]);
+  }
+}
+
+/** Renders manual-mode endpoints and the connecting straight LineString. */
+function renderManualPoints() {
+  routeSource.clear();
+  endpointSource.clear();
+  currentLocationSource.clear();
+
+  if (manualPoints.length === 0) return;
+
+  const start = new ol.Feature({
+    geometry: new ol.geom.Point(ol.proj.fromLonLat(manualPoints[0]))
+  });
+  start.set('kind', 'start');
+  endpointSource.addFeature(start);
+
+  if (manualPoints.length >= 2) {
+    const goal = new ol.Feature({
+      geometry: new ol.geom.Point(ol.proj.fromLonLat(manualPoints[1]))
+    });
+    goal.set('kind', 'goal');
+    endpointSource.addFeature(goal);
+
+    const line = new ol.Feature({
+      geometry: new ol.geom.LineString(manualPoints.map((coord) => ol.proj.fromLonLat(coord)))
+    });
+    routeSource.addFeature(line);
   }
 }
 
@@ -556,6 +589,7 @@ async function handleGpxFile(event) {
     if (loadToken !== latestRouteLoadToken) return;
     routeFeature = parsedRoute.feature;
     routeCoordinates = parsedRoute.coordinates;
+    manualPoints = [];
     elements.gpxFileName.textContent = file.name;
     renderRoute(routeFeature);
     resetResults();
@@ -568,6 +602,53 @@ async function handleGpxFile(event) {
     elements.gpxFileName.textContent = previousFileName;
     setStatus(error?.message || 'GPX の読み込みに失敗しました');
     console.error(error);
+  }
+}
+
+/** Records a manual map click as start (1st click) or goal (2nd click) and refreshes the map. */
+async function handleManualMapClick(mapCoord) {
+  if (manualPoints.length >= 2) return;
+
+  const lonLat = ol.proj.toLonLat(mapCoord);
+  manualPoints.push([lonLat[0], lonLat[1]]);
+  renderManualPoints();
+
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+
+  if (manualPoints.length === 1) {
+    routeFeature = null;
+    routeCoordinates = [];
+    resetResults();
+    updateRoutePointCount();
+    setStatus('目的地をクリックしてください');
+    return;
+  }
+
+  routeFeature = routeSource.getFeatures()[0] || null;
+  routeCoordinates = manualPoints.map((coord) => [coord[0], coord[1]]);
+  resetResults();
+  updateRoutePointCount();
+  fitToVisibleData();
+  setStatus('手動経路を生成しました');
+  if (loadToken !== latestRouteLoadToken) return;
+  await refreshMap([...routeCoordinates]);
+}
+
+/** Resets manual-mode state so the user can re-pick start and goal. */
+function resetManualState() {
+  manualPoints = [];
+  routeFeature = null;
+  routeCoordinates = [];
+  ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  routeSource.clear();
+  endpointSource.clear();
+  currentLocationSource.clear();
+  resetResults();
+  updateRoutePointCount();
+  if (selectedSourceMode() === 'manual') {
+    setStatus('地図をクリックして出発地を指定してください');
   }
 }
 
@@ -593,6 +674,7 @@ async function handleCurrentLocation() {
     const coord = [position.coords.longitude, position.coords.latitude];
     routeFeature = null;
     routeCoordinates = [coord];
+    manualPoints = [];
     renderCurrentLocation(coord);
     resetResults();
     updateRoutePointCount();
@@ -628,6 +710,7 @@ function bindEvents() {
   }
   elements.gpxFile.addEventListener('change', handleGpxFile);
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
+  elements.manualReset.addEventListener('click', resetManualState);
   elements.pointList.addEventListener('mouseover', (event) => {
     const item = findPointListItem(event.target);
     if (!item || item === findPointListItem(event.relatedTarget)) return;
@@ -656,11 +739,15 @@ function bindEvents() {
   elements.popupClose.addEventListener('click', clearPopup);
   map.on('singleclick', (event) => {
     const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
-    if (!feature || !feature.get('properties')) {
-      clearPopup();
+    const supplyFeature = feature && feature.get('properties') ? feature : null;
+    if (supplyFeature) {
+      activatePoint(supplyFeature.get('properties').supply_point_id);
       return;
     }
-    activatePoint(feature.get('properties').supply_point_id);
+    clearPopup();
+    if (selectedSourceMode() === 'manual') {
+      handleManualMapClick(event.coordinate);
+    }
   });
 }
 
