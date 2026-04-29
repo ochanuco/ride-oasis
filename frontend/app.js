@@ -746,8 +746,15 @@ function handleFollowPosition(position) {
   });
 }
 
+/** Returns true when follow mode is currently active (watch running and toggle on). */
+function isFollowActive() {
+  return followWatchId !== null && elements.followToggle.checked;
+}
+
 /** Async core for follow-mode position updates; called via the sync wrapper above. */
 async function handleFollowPositionAsync(position) {
+  if (!isFollowActive()) return;
+
   const coord = [position.coords.longitude, position.coords.latitude];
   if (followLastCoord) {
     const distance = window.RouteMath.pointToPointDistanceMeters(followLastCoord, coord);
@@ -765,10 +772,11 @@ async function handleFollowPositionAsync(position) {
 
   const now = Date.now();
   const stale = now - followLastRefreshAt >= FOLLOW_MIN_REFRESH_INTERVAL_MS;
-  const noPriorResults = allMatchedPoints.length === 0;
-  if (stale || noPriorResults) {
+  const firstFollowRefresh = followLastRefreshAt === 0;
+  if (stale || firstFollowRefresh) {
     followLastRefreshAt = now;
     await refreshMap([...routeCoordinates]);
+    if (!isFollowActive()) return;
   }
   applyForwardEmphasis();
   const bearingLabel = followBearingDeg !== null ? `${Math.round(followBearingDeg)}°` : '方位推定中';
