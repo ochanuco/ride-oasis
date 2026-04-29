@@ -777,6 +777,7 @@ async function startFollowMode() {
   }
   if (followWatchId !== null) return;
 
+  manualPoints = [];
   const currentRadio = document.querySelector('input[name="source-mode"][value="current"]');
   if (currentRadio && !currentRadio.checked) {
     currentRadio.checked = true;
