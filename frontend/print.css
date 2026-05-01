@@ -256,7 +256,7 @@ td.side-c {
 
 @media print {
   @page {
-    size: A4 portrait;
+    size: a4 portrait;
     margin: 12mm;
   }
 
@@ -289,7 +289,7 @@ td.side-c {
   }
 
   tr {
-    page-break-inside: avoid;
+    break-inside: avoid;
   }
 
   .page-footer {

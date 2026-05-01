@@ -400,6 +400,8 @@ function openCueSheet() {
     }));
   } catch (error) {
     console.error('Failed to serialize cue-sheet input', error);
+    setStatus('キューシートデータの保存に失敗しました');
+    return;
   }
   window.open('./print.html', '_blank', 'noopener');
 }
