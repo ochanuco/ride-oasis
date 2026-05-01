@@ -223,7 +223,7 @@ function resetResults() {
   pointSource.clear();
   buildPointList([]);
   updateSummary(0);
-  if (elements.cueSheetButton) elements.cueSheetButton.disabled = true;
+  syncCueSheetButton();
   clearPopup();
 }
 
@@ -384,6 +384,7 @@ function updateSummary(visibleCount) {
 
 /** Enables the cue-sheet button only when a route and matched results exist. */
 function syncCueSheetButton() {
+  if (!elements.cueSheetButton) return;
   const ready = routeCoordinates.length >= 2 && filteredPoints.length > 0;
   elements.cueSheetButton.disabled = !ready;
 }
@@ -1123,7 +1124,9 @@ function bindEvents() {
     activatePoint(item.dataset.supplyPointId);
   });
   elements.popupClose.addEventListener('click', clearPopup);
-  elements.cueSheetButton.addEventListener('click', openCueSheet);
+  if (elements.cueSheetButton) {
+    elements.cueSheetButton.addEventListener('click', openCueSheet);
+  }
   elements.resultsToggle.addEventListener('click', () => {
     if (desktopMediaQuery && desktopMediaQuery.matches) return;
     const expanded = elements.resultsSheet.classList.toggle('expanded');
@@ -1155,4 +1158,5 @@ updateRoutePointCount();
 syncDistanceUi();
 buildPointList([]);
 updateSummary(0);
+syncCueSheetButton();
 bindEvents();
