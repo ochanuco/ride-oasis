@@ -16,7 +16,7 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "rideoasis-supply-points"
-database_id = "REPLACE_AFTER_WRANGLER_D1_CREATE"
+database_id = "d93cd527-2a12-4096-a519-cc0820008c88"
 migrations_dir = "cloudflare/migrations"
 
 [observability]
