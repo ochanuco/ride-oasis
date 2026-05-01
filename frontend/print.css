@@ -200,6 +200,21 @@ td.side-c {
   vertical-align: 1px;
 }
 
+.chain-badge.cp-badge {
+  background: #fbe8d3;
+  color: #8a4a14;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+tr.cue-row-cp td {
+  background: #fdf4e8;
+}
+
+tr.cue-row-cp:nth-child(even) td {
+  background: #fbeed7;
+}
+
 .store-name {
   font-weight: 700;
 }
@@ -305,6 +320,12 @@ td.side-c {
 
   td.side-r {
     background: var(--c-right-soft) !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  tr.cue-row-cp td {
+    background: #fdf4e8 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
