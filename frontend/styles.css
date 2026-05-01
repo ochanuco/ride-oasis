@@ -279,16 +279,17 @@ input[type="search"]::-webkit-search-cancel-button {
   color: var(--c-accent-strong);
 }
 
-.geo-search-result-search {
-  background: var(--c-accent) !important;
-  border-color: var(--c-accent) !important;
-  color: #fff !important;
+.geo-search-result-actions .geo-search-result-search {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: #fff;
 }
 
-.geo-search-result-search:hover,
-.geo-search-result-search:focus-visible {
-  background: var(--c-accent-strong) !important;
-  border-color: var(--c-accent-strong) !important;
+.geo-search-result-actions .geo-search-result-search:hover,
+.geo-search-result-actions .geo-search-result-search:focus-visible {
+  background: var(--c-accent-strong);
+  border-color: var(--c-accent-strong);
+  color: #fff;
 }
 
 .geo-search-empty {
