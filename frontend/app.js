@@ -176,6 +176,7 @@ let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
 let activePopupKind = null;
+let activeCoursePointType = null;
 let previewSupplyPointId = null;
 const API_PAGE_LIMIT = 10000;
 const featureIndex = new Map();
@@ -393,6 +394,7 @@ function activateCoursePoint(feature) {
   ].filter(Boolean).join('');
   elements.popup.hidden = false;
   activePopupKind = 'course-point';
+  activeCoursePointType = cp.type || null;
   // Course points are not part of the supply-point selection flow, so we
   // explicitly clear any prior supply selection without closing this popup.
   activeSupplyPointId = null;
@@ -440,6 +442,7 @@ function clearPopup() {
   elements.popup.hidden = true;
   popupOverlay.setPosition(undefined);
   activePopupKind = null;
+  activeCoursePointType = null;
   syncPointHighlight();
   syncPointListSelection();
 }
@@ -578,7 +581,7 @@ function rebuildCoursePointTypeChips() {
       if (input.checked) disabledCoursePointTypes.delete(type);
       else disabledCoursePointTypes.add(type);
       coursePointLayer.changed();
-      if (!input.checked && activePopupKind === 'course-point') {
+      if (!input.checked && activePopupKind === 'course-point' && activeCoursePointType === type) {
         clearPopup();
       }
     });
