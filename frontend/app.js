@@ -44,6 +44,7 @@ const elements = {
   cueSheetButton: document.getElementById('cue-sheet-button'),
   gpxExportButton: document.getElementById('gpx-export-button'),
   showCoursePoints: document.getElementById('show-course-points'),
+  coursePointTypes: document.getElementById('course-point-types'),
   rwgForm: document.getElementById('rwg-form'),
   rwgUrl: document.getElementById('rwg-url'),
   rwgFetch: document.getElementById('rwg-fetch')
@@ -121,18 +122,25 @@ const currentLocationLayer = new ol.layer.Vector({
   })
 });
 
+const coursePointBaseStyle = new ol.style.Style({
+  image: new ol.style.RegularShape({
+    points: 5,
+    radius: 9,
+    radius2: 4,
+    angle: 0,
+    fill: new ol.style.Fill({ color: '#c62f2f' }),
+    stroke: new ol.style.Stroke({ color: '#ffffff', width: 1.5 })
+  })
+});
+
 const coursePointLayer = new ol.layer.Vector({
   source: coursePointSource,
-  style: new ol.style.Style({
-    image: new ol.style.RegularShape({
-      points: 5,
-      radius: 9,
-      radius2: 4,
-      angle: 0,
-      fill: new ol.style.Fill({ color: '#c62f2f' }),
-      stroke: new ol.style.Stroke({ color: '#ffffff', width: 1.5 })
-    })
-  })
+  style(feature) {
+    const cp = feature && feature.get('coursePoint');
+    if (!cp) return null;
+    if (disabledCoursePointTypes.has(cp.type)) return null;
+    return coursePointBaseStyle;
+  }
 });
 
 const map = new ol.Map({
@@ -163,6 +171,7 @@ let routeFeature = null;
 let routeCoordinates = [];
 let manualPoints = [];
 let cachedCoursePoints = [];
+let disabledCoursePointTypes = new Set();
 let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
@@ -524,6 +533,7 @@ function clearRouteVisualSources() {
 function renderCoursePoints(points) {
   coursePointSource.clear();
   cachedCoursePoints = Array.isArray(points) ? points.slice() : [];
+  disabledCoursePointTypes = new Set();
   for (const cp of cachedCoursePoints) {
     if (!Number.isFinite(cp?.lat) || !Number.isFinite(cp?.lon)) continue;
     const feature = new ol.Feature({
@@ -535,12 +545,48 @@ function renderCoursePoints(points) {
   if (elements.showCoursePoints) {
     coursePointLayer.setVisible(elements.showCoursePoints.checked);
   }
+  rebuildCoursePointTypeChips();
 }
 
-/** Returns the cached course points filtered by the show-course-points toggle. */
+/** Returns the cached course points filtered by both the master toggle and per-type filters. */
 function visibleCoursePoints() {
   if (elements.showCoursePoints && !elements.showCoursePoints.checked) return [];
-  return cachedCoursePoints.slice();
+  return cachedCoursePoints.filter((cp) => !disabledCoursePointTypes.has(cp.type));
+}
+
+/** Rebuilds the per-type chip filters from the unique types in cachedCoursePoints. */
+function rebuildCoursePointTypeChips() {
+  const container = elements.coursePointTypes;
+  if (!container) return;
+  container.innerHTML = '';
+  const types = new Set();
+  for (const cp of cachedCoursePoints) {
+    if (typeof cp?.type === 'string' && cp.type) types.add(cp.type);
+  }
+  if (types.size === 0) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  for (const type of [...types].sort()) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = type;
+    input.checked = true;
+    input.addEventListener('change', () => {
+      if (input.checked) disabledCoursePointTypes.delete(type);
+      else disabledCoursePointTypes.add(type);
+      coursePointLayer.changed();
+      if (!input.checked && activePopupKind === 'course-point') {
+        clearPopup();
+      }
+    });
+    const span = document.createElement('span');
+    span.textContent = type;
+    label.append(input, span);
+    container.appendChild(label);
+  }
 }
 
 /** Renders the uploaded route and its start/end markers. */
@@ -1380,7 +1426,12 @@ function bindEvents() {
     }
     const cpFeature = map.forEachFeatureAtPixel(
       event.pixel,
-      (candidate) => (candidate && candidate.get('coursePoint') ? candidate : undefined)
+      (candidate) => {
+        const cp = candidate && candidate.get('coursePoint');
+        if (!cp) return undefined;
+        if (disabledCoursePointTypes.has(cp.type)) return undefined;
+        return candidate;
+      }
     );
     if (cpFeature) {
       activateCoursePoint(cpFeature);

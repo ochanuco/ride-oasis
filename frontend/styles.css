@@ -825,6 +825,17 @@ input[type="search"]::-webkit-search-cancel-button {
   color: var(--c-accent-strong);
 }
 
+.course-point-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.course-point-types[hidden] {
+  display: none;
+}
+
 .results-filters .chains input[type="checkbox"] {
   width: 14px;
   height: 14px;
