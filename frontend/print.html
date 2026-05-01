@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RideOasis キューシート (補給地点)</title>
+    <link rel="stylesheet" href="./print.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="page-title">
+        <h1>RideOasis キューシート</h1>
+        <p class="page-subtitle">補給地点リスト</p>
+      </div>
+      <div class="page-meta">
+        <span id="meta-route-length">経路長: -</span>
+        <span id="meta-distance">近傍距離: -</span>
+        <span id="meta-count">補給地点: -</span>
+      </div>
+      <div class="page-actions no-print">
+        <button id="print-btn" type="button" class="primary">印刷 / PDF 保存</button>
+        <button id="close-btn" type="button">閉じる</button>
+      </div>
+    </header>
+
+    <main>
+      <table id="cue-table">
+        <thead>
+          <tr>
+            <th class="col-no">No</th>
+            <th class="col-cum">累計 km</th>
+            <th class="col-int">区間 km</th>
+            <th class="col-side">左/右</th>
+            <th class="col-perp">離れ m</th>
+            <th class="col-store">店舗</th>
+            <th class="col-addr">住所</th>
+          </tr>
+        </thead>
+        <tbody id="cue-body">
+          <tr>
+            <td colspan="7" class="empty">補給地点データがありません。元のページで GPX または手動2点指定を行い、検索結果が表示された状態で「キューシート」ボタンを押してください。</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+
+    <footer class="page-footer">
+      <span>RideOasis - <span id="generated-at"></span></span>
+      <span class="legend">
+        <span class="legend-item"><span class="side-mark side-l">左</span> = 進行方向左 (停車しやすい)</span>
+        <span class="legend-item"><span class="side-mark side-r">右</span> = 進行方向右 (横断が必要な場合あり)</span>
+      </span>
+    </footer>
+
+    <script src="./route_math.js"></script>
+    <script src="./print.js"></script>
+  </body>
+</html>
