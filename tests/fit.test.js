@@ -124,3 +124,19 @@ test('FIT Parser: parseFitArrayBuffer はライブラリのエラーを Error �
   const buffer = new ArrayBuffer(16);
   await assert.rejects(parseFitArrayBuffer(buffer, { importFn }), /boom/);
 });
+
+test('FIT Parser: parseFitArrayBuffer は Error インスタンスをそのまま reject する', async () => {
+  _resetCacheForTests();
+  const original = new Error('detail message');
+  original.code = 'XYZ';
+  class FailingParser {
+    parse(_buffer, cb) { cb(original); }
+  }
+  const importFn = async () => ({ default: FailingParser });
+  const buffer = new ArrayBuffer(16);
+  await assert.rejects(parseFitArrayBuffer(buffer, { importFn }), (received) => {
+    assert.equal(received, original);
+    assert.equal(received.code, 'XYZ');
+    return true;
+  });
+});

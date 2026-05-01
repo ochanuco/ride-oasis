@@ -100,7 +100,11 @@
     return new Promise((resolve, reject) => {
       parser.parse(buffer, (error, data) => {
         if (error) {
-          reject(new Error(typeof error === 'string' ? error : 'FIT parse failed'));
+          if (error instanceof Error) {
+            reject(error);
+          } else {
+            reject(new Error(typeof error === 'string' && error ? error : String(error || 'FIT parse failed')));
+          }
           return;
         }
         resolve(normalizeFitData(data));

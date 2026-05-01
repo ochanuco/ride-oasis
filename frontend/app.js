@@ -568,7 +568,7 @@ function findPointListItem(node) {
 function fitToVisibleData() {
   const extent = ol.extent.createEmpty();
   let hasData = false;
-  for (const source of [routeSource, pointSource, endpointSource, currentLocationSource]) {
+  for (const source of [routeSource, pointSource, endpointSource, currentLocationSource, coursePointSource]) {
     const sourceExtent = source.getExtent();
     if (sourceExtent && !ol.extent.isEmpty(sourceExtent)) {
       ol.extent.extend(extent, sourceExtent);
@@ -1255,11 +1255,13 @@ function bindEvents() {
   }
   window.addEventListener('resize', () => map.updateSize());
   map.on('singleclick', (event) => {
-    const feature = map.forEachFeatureAtPixel(
+    const supplyFeature = map.forEachFeatureAtPixel(
       event.pixel,
-      (candidate) => (candidate && candidate.get('properties') ? candidate : undefined)
+      (candidate) => {
+        const props = candidate && candidate.get('properties');
+        return props && props.supply_point_id != null ? candidate : undefined;
+      }
     );
-    const supplyFeature = feature && feature.get('properties') ? feature : null;
     if (supplyFeature) {
       activatePoint(supplyFeature.get('properties').supply_point_id);
       return;
