@@ -172,6 +172,8 @@ let routeCoordinates = [];
 let manualPoints = [];
 let cachedCoursePoints = [];
 let disabledCoursePointTypes = new Set();
+let currentRwgId = null;
+let pendingCptypesFilter = null;
 let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
@@ -530,6 +532,7 @@ function clearRouteVisualSources() {
   currentLocationSource.clear();
   coursePointSource.clear();
   cachedCoursePoints = [];
+  currentRwgId = null;
 }
 
 /** Renders FIT course-point waypoints (PCs / aid stations / etc.) on the map. */
@@ -571,12 +574,23 @@ function rebuildCoursePointTypeChips() {
     return;
   }
   container.hidden = false;
+  // If init parsed `cptypes` from the URL, only those types stay enabled.
+  // The pending filter is one-shot so user toggles after this don't get
+  // overridden the next time chips rebuild.
+  const enabledFromUrl = Array.isArray(pendingCptypesFilter)
+    ? new Set(pendingCptypesFilter)
+    : null;
   for (const type of [...types].sort()) {
     const label = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.value = type;
-    input.checked = true;
+    if (enabledFromUrl && !enabledFromUrl.has(type)) {
+      input.checked = false;
+      disabledCoursePointTypes.add(type);
+    } else {
+      input.checked = true;
+    }
     input.addEventListener('change', () => {
       if (input.checked) disabledCoursePointTypes.delete(type);
       else disabledCoursePointTypes.add(type);
@@ -584,11 +598,16 @@ function rebuildCoursePointTypeChips() {
       if (!input.checked && activePopupKind === 'course-point' && activeCoursePointType === type) {
         clearPopup();
       }
+      syncUrlState();
     });
     const span = document.createElement('span');
     span.textContent = type;
     label.append(input, span);
     container.appendChild(label);
+  }
+  if (enabledFromUrl) {
+    pendingCptypesFilter = null;
+    coursePointLayer.changed();
   }
 }
 
@@ -867,12 +886,14 @@ async function handleRouteFile(event) {
     routeFeature = parsedRoute.feature;
     routeCoordinates = parsedRoute.coordinates;
     manualPoints = [];
+    currentRwgId = null;
     elements.gpxFileName.textContent = file.name;
     renderRoute(routeFeature);
     renderCoursePoints(coursePoints);
     resetResults();
     updateRoutePointCount();
     fitToVisibleData();
+    syncUrlState();
     const cpInfo = coursePoints.length > 0 ? ` (PC ${coursePoints.length} 件)` : '';
     setStatus(`${isFit ? 'FIT' : 'GPX'} を読み込みました: ${file.name}${cpInfo}`);
     await refreshMap([...routeCoordinates]);
@@ -922,6 +943,8 @@ async function handleRwgFetch(event) {
     fitToVisibleData();
     const cpInfo = (rwg.coursePoints || []).length > 0 ? ` (PC ${rwg.coursePoints.length} 件)` : '';
     setStatus(`RWG ルートを読み込みました: ${displayName}${cpInfo}`);
+    currentRwgId = id;
+    syncUrlState();
     await refreshMap([...routeCoordinates]);
   } catch (error) {
     if (loadToken !== latestRouteLoadToken) return;
@@ -959,6 +982,7 @@ async function handleManualMapClick(mapCoord) {
   updateRoutePointCount();
   fitToVisibleData();
   setStatus('手動経路を生成しました');
+  syncUrlState();
   if (loadToken !== latestRouteLoadToken) return;
   await refreshMap([...routeCoordinates]);
 }
@@ -1006,6 +1030,7 @@ async function handleCurrentLocation() {
     updateRoutePointCount();
     fitToVisibleData();
     setStatus('現在地を取得しました');
+    syncUrlState();
     await refreshMap([...routeCoordinates]);
   } catch (error) {
     if (loadToken !== latestRouteLoadToken) return;
@@ -1313,6 +1338,76 @@ function handleGeoSearchClear() {
   elements.geoSearchInput.focus();
 }
 
+/** Reads the currently checked filter inputs into the {chains, precision, cptypes} state shape. */
+function readFilterStateForUrl() {
+  const allChainInputs = Array.from(document.querySelectorAll('.chain-filters input[type="checkbox"]'));
+  const checkedChains = allChainInputs.filter((input) => input.checked).map((input) => input.value);
+  const allPrecisionInputs = Array.from(document.querySelectorAll('input[name="precision-filter"]'));
+  const checkedPrecisions = allPrecisionInputs.filter((input) => input.checked).map((input) => input.value);
+  const cptypesInputs = elements.coursePointTypes
+    ? Array.from(elements.coursePointTypes.querySelectorAll('input[type="checkbox"]'))
+    : [];
+  const checkedCptypes = cptypesInputs.filter((input) => input.checked).map((input) => input.value);
+
+  const chainsAllOn = checkedChains.length === allChainInputs.length;
+  const precisionAllOn = checkedPrecisions.length === allPrecisionInputs.length;
+  const cptypesAllOn = cptypesInputs.length === 0 || checkedCptypes.length === cptypesInputs.length;
+  const cpMaster = elements.showCoursePoints ? elements.showCoursePoints.checked : true;
+
+  return {
+    chains: chainsAllOn ? null : checkedChains,
+    precision: precisionAllOn ? null : checkedPrecisions,
+    cp: cpMaster ? null : false,
+    cptypes: cptypesInputs.length === 0 || cptypesAllOn ? null : checkedCptypes
+  };
+}
+
+/** Replaces the URL query string with the current filter state + active RWG id. */
+function syncUrlState() {
+  if (!window.UrlState) return;
+  const existing = window.UrlState.parseUrlState(window.location.search);
+  const filterState = readFilterStateForUrl();
+  const next = {
+    rwg: Number.isFinite(currentRwgId) ? currentRwgId : null,
+    ...filterState,
+    extra: existing.extra
+  };
+  const search = window.UrlState.formatUrlState(next);
+  const url = `${window.location.pathname}${search}${window.location.hash}`;
+  window.history.replaceState({}, '', url);
+}
+
+/** Applies the parsed URL state to checkbox inputs and queues async work (RWG fetch + cptypes). */
+function applyUrlStateOnInit() {
+  if (!window.UrlState) return;
+  const state = window.UrlState.parseUrlState(window.location.search);
+
+  if (Array.isArray(state.chains)) {
+    const allow = new Set(state.chains);
+    for (const input of document.querySelectorAll('.chain-filters input[type="checkbox"]')) {
+      input.checked = allow.has(input.value);
+    }
+  }
+  if (Array.isArray(state.precision)) {
+    const allow = new Set(state.precision);
+    for (const input of document.querySelectorAll('input[name="precision-filter"]')) {
+      input.checked = allow.has(input.value);
+    }
+  }
+  if (state.cp === false && elements.showCoursePoints) {
+    elements.showCoursePoints.checked = false;
+    coursePointLayer.setVisible(false);
+  }
+  if (Array.isArray(state.cptypes)) {
+    pendingCptypesFilter = state.cptypes;
+  }
+
+  if (Number.isFinite(state.rwg) && state.rwg > 0 && elements.rwgUrl) {
+    elements.rwgUrl.value = String(state.rwg);
+    handleRwgFetch();
+  }
+}
+
 /** Wires DOM and map click events for the static frontend. */
 function bindEvents() {
   for (const input of document.querySelectorAll('input[name="source-mode"]')) {
@@ -1339,7 +1434,10 @@ function bindEvents() {
     }
   });
   for (const input of document.querySelectorAll('.result-filters input[type="checkbox"]')) {
-    input.addEventListener('change', applyResultFilters);
+    input.addEventListener('change', () => {
+      applyResultFilters();
+      syncUrlState();
+    });
   }
   elements.gpxFile.addEventListener('change', handleRouteFile);
   if (elements.rwgForm) {
@@ -1401,6 +1499,7 @@ function bindEvents() {
       if (!elements.showCoursePoints.checked && activePopupKind === 'course-point') {
         clearPopup();
       }
+      syncUrlState();
     });
   }
   elements.resultsToggle.addEventListener('click', () => {
@@ -1454,3 +1553,4 @@ buildPointList([]);
 updateSummary(0);
 syncCueSheetButton();
 bindEvents();
+applyUrlStateOnInit();
