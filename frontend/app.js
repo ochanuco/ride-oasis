@@ -43,7 +43,10 @@ const elements = {
   resultsToggle: document.getElementById('results-toggle'),
   cueSheetButton: document.getElementById('cue-sheet-button'),
   gpxExportButton: document.getElementById('gpx-export-button'),
-  showCoursePoints: document.getElementById('show-course-points')
+  showCoursePoints: document.getElementById('show-course-points'),
+  rwgForm: document.getElementById('rwg-form'),
+  rwgUrl: document.getElementById('rwg-url'),
+  rwgFetch: document.getElementById('rwg-fetch')
 };
 
 const CUE_SHEET_STORAGE_KEY = 'rideoasis-cue-sheet';
@@ -370,9 +373,13 @@ function activateCoursePoint(feature) {
       projLine = `<div class="popup-distance">累計 ${cumKm} km / ${sideLabel}側 / 離れ ${Math.round(proj.perpMeters)} m</div>`;
     }
   }
+  const descLine = cp.description
+    ? `<div class="popup-description">${escapeHtml(cp.description)}</div>`
+    : '';
   elements.popupBody.innerHTML = [
     `<div class="popup-chain">${escapeHtml(cp.type || 'course point')}</div>`,
     `<div class="popup-title">${escapeHtml(cp.name || '(無名)')}</div>`,
+    descLine,
     projLine
   ].filter(Boolean).join('');
   elements.popup.hidden = false;
@@ -828,6 +835,55 @@ async function handleRouteFile(event) {
   }
 }
 
+/** Fetches a RideWithGPS public route by URL/id, applies it as the active route. */
+async function handleRwgFetch(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (!window.RwgImport || typeof window.RwgImport.fetchRoute !== 'function') {
+    setStatus('RWG インポータの初期化に失敗しました。ページを再読み込みしてください');
+    return;
+  }
+  const value = elements.rwgUrl ? elements.rwgUrl.value : '';
+  const id = window.RwgImport.parseRouteId(value);
+  if (id == null) {
+    setStatus('RWG の URL / ID が認識できません');
+    return;
+  }
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  const previousFileName = elements.gpxFileName.textContent;
+  if (elements.rwgFetch) elements.rwgFetch.disabled = true;
+  try {
+    setStatus(`RWG #${id} を取得中...`);
+    const rwg = await window.RwgImport.fetchRoute(id);
+    if (loadToken !== latestRouteLoadToken) return;
+    if (!rwg.records || rwg.records.length < 2) {
+      throw new Error('RWG ルートから 2 点以上の経路座標を取得できませんでした');
+    }
+    const coords = rwg.records.map((r) => [r.lon, r.lat]);
+    const parsedRoute = createRouteFeatureFromCoords(coords);
+    routeFeature = parsedRoute.feature;
+    routeCoordinates = parsedRoute.coordinates;
+    manualPoints = [];
+    const displayName = rwg.name || `RWG #${id}`;
+    elements.gpxFileName.textContent = displayName;
+    renderRoute(routeFeature);
+    renderCoursePoints(rwg.coursePoints || []);
+    resetResults();
+    updateRoutePointCount();
+    fitToVisibleData();
+    const cpInfo = (rwg.coursePoints || []).length > 0 ? ` (PC ${rwg.coursePoints.length} 件)` : '';
+    setStatus(`RWG ルートを読み込みました: ${displayName}${cpInfo}`);
+    await refreshMap([...routeCoordinates]);
+  } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
+    elements.gpxFileName.textContent = previousFileName;
+    setStatus(error?.message || 'RWG ルートの取得に失敗しました');
+    console.error(error);
+  } finally {
+    if (elements.rwgFetch) elements.rwgFetch.disabled = false;
+  }
+}
+
 /** Records a manual map click as start (1st click) or goal (2nd click) and refreshes the map. */
 async function handleManualMapClick(mapCoord) {
   if (manualPoints.length >= 2) return;
@@ -1237,6 +1293,9 @@ function bindEvents() {
     input.addEventListener('change', applyResultFilters);
   }
   elements.gpxFile.addEventListener('change', handleRouteFile);
+  if (elements.rwgForm) {
+    elements.rwgForm.addEventListener('submit', handleRwgFetch);
+  }
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
   elements.followToggle.addEventListener('change', handleFollowToggle);
   elements.manualReset.addEventListener('click', resetManualState);

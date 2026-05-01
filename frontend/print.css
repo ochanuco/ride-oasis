@@ -219,6 +219,16 @@ tr.cue-row-cp:nth-child(even) td {
   font-weight: 700;
 }
 
+.cp-description {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #6c5a3a;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .empty {
   text-align: center;
   color: var(--c-muted);

@@ -54,6 +54,9 @@
 
     if (row.kind === 'course-point') {
       const cp = row.cp;
+      const desc = cp.description
+        ? `<div class="cp-description">${escapeHtml(cp.description)}</div>`
+        : '';
       return {
         className: 'cue-row-cp',
         html: [
@@ -62,7 +65,7 @@
           `<td class="num">${intervalKm}</td>`,
           `<td class="${sideClass}">${sideLabel}</td>`,
           `<td class="num">${Math.round(row.proj.perpMeters)}</td>`,
-          `<td><span class="chain-badge cp-badge">★ ${escapeHtml(cp.type || 'PC')}</span><span class="store-name">${escapeHtml(cp.name || '(無名)')}</span></td>`,
+          `<td><span class="chain-badge cp-badge">★ ${escapeHtml(cp.type || 'PC')}</span><span class="store-name">${escapeHtml(cp.name || '(無名)')}</span>${desc}</td>`,
           `<td>—</td>`
         ].join('')
       };

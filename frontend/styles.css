@@ -389,6 +389,55 @@ input[type="search"]::-webkit-search-cancel-button {
   display: none;
 }
 
+.rwg-form {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 200px;
+}
+
+.rwg-form input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-md);
+  background: var(--c-surface-muted);
+  color: var(--c-ink);
+  font-size: 13px;
+}
+
+.rwg-form input[type="text"]:focus-visible {
+  outline: 2px solid rgba(34, 94, 168, 0.25);
+  border-color: var(--c-accent);
+  background: var(--c-surface);
+}
+
+.rwg-fetch {
+  flex-shrink: 0;
+  height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--c-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rwg-fetch:hover:not(:disabled),
+.rwg-fetch:focus-visible:not(:disabled) {
+  background: var(--c-accent-strong);
+}
+
+.rwg-fetch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ctx-meta {
   display: flex;
   flex-direction: column;
@@ -598,6 +647,15 @@ input[type="search"]::-webkit-search-cancel-button {
 .popup-distance {
   color: var(--c-ink-muted);
   font-size: 13px;
+}
+
+.popup-description {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-ink);
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 /* ========== Results sheet (mobile bottom sheet, desktop sidebar) ========== */
