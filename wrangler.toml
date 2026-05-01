@@ -1,0 +1,23 @@
+name = "ride-oasis-map"
+main = "worker.mjs"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Static frontend served straight from frontend/. The Worker only intercepts
+# the supply-point API; everything else falls through to the asset bundle.
+[assets]
+directory = "frontend"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Cloudflare D1 binding holding the supply_points table. Run `wrangler d1 create
+# rideoasis-supply-points` once and paste the returned database_id below before
+# the first deploy. Local `wrangler dev --local` uses an in-memory copy.
+[[d1_databases]]
+binding = "DB"
+database_name = "rideoasis-supply-points"
+database_id = "REPLACE_AFTER_WRANGLER_D1_CREATE"
+migrations_dir = "cloudflare/migrations"
+
+[observability]
+enabled = true
