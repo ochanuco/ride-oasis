@@ -1,0 +1,29 @@
+name = "ride-oasis"
+main = "worker.mjs"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Static frontend served straight from frontend/. The Worker only intercepts
+# the supply-point API; everything else falls through to the asset bundle.
+[assets]
+directory = "frontend"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Production D1 binding. Run `wrangler d1 create rideoasis-supply-points` once
+# and paste the returned database_id below before the first deploy. Local
+# `wrangler dev --local` uses an in-memory copy.
+[[d1_databases]]
+binding = "DB"
+database_name = "rideoasis-supply-points"
+database_id = "d93cd527-2a12-4096-a519-cc0820008c88"
+migrations_dir = "cloudflare/migrations"
+
+[observability]
+enabled = true
+
+# 非本番ブランチからのプレビューには `wrangler versions upload` を使う
+# (npm run cf:preview)。同じ ride-oasis Worker に新しい version が
+# 追加され、本番トラフィックは影響を受けないまま、その version 専用の
+# preview URL (<version-id>-ride-oasis.workers.dev) が返ってくる。
+# `wrangler versions deploy` を呼ぶまで本番への昇格は起きない。

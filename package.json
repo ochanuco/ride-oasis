@@ -14,7 +14,16 @@
     "geocode:ndjson": "node scripts/geocode_stores_ndjson.js",
     "bq:upsert:geocoded": "node scripts/bq_upsert_geocoded.js",
     "export:map-db": "node scripts/export_map_db.js",
-    "map:serve": "node scripts/map_dev_server.js"
+    "map:serve": "node scripts/map_dev_server.js",
+    "cf:export-seed": "node scripts/export_d1_seed.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "cf:preview": "wrangler versions upload",
+    "cf:promote": "wrangler versions deploy",
+    "cf:migrate:remote": "wrangler d1 migrations apply rideoasis-supply-points --remote",
+    "cf:migrate:local": "wrangler d1 migrations apply rideoasis-supply-points --local",
+    "cf:seed:remote": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --remote",
+    "cf:seed:local": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --local"
   },
   "engines": {
     "node": ">=22.5.0",
@@ -35,7 +44,8 @@
   "homepage": "https://github.com/ochanuco/ride-oasis#readme",
   "devDependencies": {
     "@playwright/test": "^1.58.2",
-    "playwright": "^1.58.2"
+    "playwright": "^1.58.2",
+    "wrangler": "^4.41.0"
   },
   "dependencies": {
     "@geolonia/normalize-japanese-addresses": "^3.1.3"

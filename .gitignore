@@ -9,6 +9,8 @@ playwright-report/
 test-results/
 data/
 .local/
+.wrangler/
+cloudflare/seed.sql
 
 # .claude is ignored by ~/.config/git/ignore — re-allow shared Claude Code config
 !.claude/
