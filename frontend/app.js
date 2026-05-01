@@ -163,6 +163,7 @@ let cachedCoursePoints = [];
 let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
+let activePopupKind = null;
 let previewSupplyPointId = null;
 const API_PAGE_LIMIT = 10000;
 const featureIndex = new Map();
@@ -352,6 +353,7 @@ function openPopupForFeature(feature) {
   popupOverlay.setPosition(feature.getGeometry().getCoordinates());
   elements.popupBody.innerHTML = buildPopupHtml(feature.get('properties'));
   elements.popup.hidden = false;
+  activePopupKind = 'supply';
 }
 
 /** Opens the popup for a clicked FIT course point with route projection info. */
@@ -374,6 +376,7 @@ function activateCoursePoint(feature) {
     projLine
   ].filter(Boolean).join('');
   elements.popup.hidden = false;
+  activePopupKind = 'course-point';
   // Course points are not part of the supply-point selection flow, so we
   // explicitly clear any prior supply selection without closing this popup.
   activeSupplyPointId = null;
@@ -420,6 +423,7 @@ function clearPopup() {
   previewSupplyPointId = null;
   elements.popup.hidden = true;
   popupOverlay.setPosition(undefined);
+  activePopupKind = null;
   syncPointHighlight();
   syncPointListSelection();
 }
@@ -1286,7 +1290,7 @@ function bindEvents() {
   if (elements.showCoursePoints) {
     elements.showCoursePoints.addEventListener('change', () => {
       coursePointLayer.setVisible(elements.showCoursePoints.checked);
-      if (!elements.showCoursePoints.checked) {
+      if (!elements.showCoursePoints.checked && activePopupKind === 'course-point') {
         clearPopup();
       }
     });
