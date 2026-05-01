@@ -38,8 +38,14 @@ const elements = {
   geoSearchInput: document.getElementById('geo-search-input'),
   geoSearchSubmit: document.getElementById('geo-search-submit'),
   geoSearchClear: document.getElementById('geo-search-clear'),
-  geoSearchResults: document.getElementById('geo-search-results')
+  geoSearchResults: document.getElementById('geo-search-results'),
+  resultsSheet: document.getElementById('results-sheet'),
+  resultsToggle: document.getElementById('results-toggle')
 };
+
+const desktopMediaQuery = typeof window.matchMedia === 'function'
+  ? window.matchMedia('(min-width: 821px)')
+  : null;
 
 const routeGeoJsonFormat = new ol.format.GeoJSON({ featureProjection: 'EPSG:3857' });
 
@@ -1088,6 +1094,18 @@ function bindEvents() {
     activatePoint(item.dataset.supplyPointId);
   });
   elements.popupClose.addEventListener('click', clearPopup);
+  elements.resultsToggle.addEventListener('click', () => {
+    if (desktopMediaQuery && desktopMediaQuery.matches) return;
+    const expanded = elements.resultsSheet.classList.toggle('expanded');
+    elements.resultsToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    setTimeout(() => map.updateSize(), 260);
+  });
+  if (desktopMediaQuery) {
+    desktopMediaQuery.addEventListener('change', () => {
+      map.updateSize();
+    });
+  }
+  window.addEventListener('resize', () => map.updateSize());
   map.on('singleclick', (event) => {
     const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
     const supplyFeature = feature && feature.get('properties') ? feature : null;
