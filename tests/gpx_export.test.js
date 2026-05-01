@@ -39,6 +39,20 @@ test('GPX Export: 経路が短いと <trk> を省略する', () => {
   assert.match(xml, /<wpt lat="35" lon="139">/);
 });
 
+test('GPX Export: 無効座標を除いて trkpt が1点しか残らないと <trk> を省略する', () => {
+  const xml = buildGpxText({
+    route: [
+      [139, 35],
+      [Number.NaN, 35]
+    ],
+    waypoints: [{ lat: 35, lon: 139, name: 'Solo' }]
+  });
+  assert.equal(xml.includes('<trk>'), false);
+  const trkptCount = (xml.match(/<trkpt /g) || []).length;
+  assert.equal(trkptCount, 0);
+  assert.match(xml, /<wpt lat="35" lon="139">/);
+});
+
 test('GPX Export: 不正な座標の wpt と trkpt は除外する', () => {
   const xml = buildGpxText({
     route: [

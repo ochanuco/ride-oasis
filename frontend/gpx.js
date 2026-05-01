@@ -81,12 +81,14 @@
       .join('\n');
 
     let trkXml = '';
-    if (Array.isArray(route) && route.length >= 2) {
-      const trkpts = route
-        .filter((c) => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]))
-        .map(([lon, lat]) => `      <trkpt lat="${lat}" lon="${lon}"></trkpt>`)
-        .join('\n');
-      if (trkpts) {
+    if (Array.isArray(route)) {
+      const validRoute = route.filter(
+        (c) => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1])
+      );
+      if (validRoute.length >= 2) {
+        const trkpts = validRoute
+          .map(([lon, lat]) => `      <trkpt lat="${lat}" lon="${lon}"></trkpt>`)
+          .join('\n');
         trkXml = [
           `  <trk>`,
           `    <name>${safeName}</name>`,
