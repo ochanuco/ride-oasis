@@ -40,8 +40,11 @@ const elements = {
   geoSearchClear: document.getElementById('geo-search-clear'),
   geoSearchResults: document.getElementById('geo-search-results'),
   resultsSheet: document.getElementById('results-sheet'),
-  resultsToggle: document.getElementById('results-toggle')
+  resultsToggle: document.getElementById('results-toggle'),
+  cueSheetButton: document.getElementById('cue-sheet-button')
 };
+
+const CUE_SHEET_STORAGE_KEY = 'rideoasis-cue-sheet';
 
 const desktopMediaQuery = typeof window.matchMedia === 'function'
   ? window.matchMedia('(min-width: 821px)')
@@ -220,6 +223,7 @@ function resetResults() {
   pointSource.clear();
   buildPointList([]);
   updateSummary(0);
+  if (elements.cueSheetButton) elements.cueSheetButton.disabled = true;
   clearPopup();
 }
 
@@ -376,6 +380,28 @@ function clearPopup() {
 /** Updates summary card for visible results. */
 function updateSummary(visibleCount) {
   elements.matchedCount.textContent = String(visibleCount);
+}
+
+/** Enables the cue-sheet button only when a route and matched results exist. */
+function syncCueSheetButton() {
+  const ready = routeCoordinates.length >= 2 && filteredPoints.length > 0;
+  elements.cueSheetButton.disabled = !ready;
+}
+
+/** Serializes the current cue-sheet input and opens the printable page. */
+function openCueSheet() {
+  if (routeCoordinates.length < 2 || filteredPoints.length === 0) return;
+  try {
+    localStorage.setItem(CUE_SHEET_STORAGE_KEY, JSON.stringify({
+      routeCoordinates,
+      filteredPoints,
+      distanceMeters: selectedDistanceMeters(),
+      generatedAt: new Date().toISOString()
+    }));
+  } catch (error) {
+    console.error('Failed to serialize cue-sheet input', error);
+  }
+  window.open('./print.html', '_blank', 'noopener');
 }
 
 /** Clears the three drawing sources used for route and location visuals. */
@@ -582,6 +608,7 @@ function applyResultFilters() {
     popupOverlay.setPosition(undefined);
   }
   updateSummary(filteredPoints.length);
+  syncCueSheetButton();
   fitToVisibleData();
   setStatus(`${filteredPoints.length} 件を表示中`);
 }
@@ -1094,6 +1121,7 @@ function bindEvents() {
     activatePoint(item.dataset.supplyPointId);
   });
   elements.popupClose.addEventListener('click', clearPopup);
+  elements.cueSheetButton.addEventListener('click', openCueSheet);
   elements.resultsToggle.addEventListener('click', () => {
     if (desktopMediaQuery && desktopMediaQuery.matches) return;
     const expanded = elements.resultsSheet.classList.toggle('expanded');

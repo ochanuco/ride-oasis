@@ -7,7 +7,9 @@ const {
   pointToPointDistanceMeters,
   pointToRouteDistanceMeters,
   bearingDegrees,
-  isWithinHeadingDeg
+  isWithinHeadingDeg,
+  cumulativeDistancesMeters,
+  routeProjection
 } = require('../frontend/route_math');
 const { parseCoordinateTokens, parseGpxText } = require('../frontend/gpx');
 
@@ -137,4 +139,70 @@ test('Route Math: ヘディングは 360 度ラップを正しく扱う', () => 
 test('Route Math: 不正なヘディング入力は false を返す', () => {
   assert.equal(isWithinHeadingDeg(Number.NaN, 90, 90), false);
   assert.equal(isWithinHeadingDeg(0, Number.NaN, 90), false);
+});
+
+test('Route Math: 累計距離は各頂点までの合計を返す', () => {
+  const cum = cumulativeDistancesMeters([
+    [139.0, 35.0],
+    [139.001, 35.0],
+    [139.002, 35.0]
+  ]);
+  assert.equal(cum.length, 3);
+  assert.equal(cum[0], 0);
+  assert.ok(cum[1] > 80 && cum[1] < 100);
+  assert.ok(cum[2] > 170 && cum[2] < 200);
+});
+
+test('Route Math: 累計距離は空配列で空配列を返す', () => {
+  assert.deepEqual(cumulativeDistancesMeters([]), []);
+});
+
+test('Route Math: routeProjection は東進ルートで北側の点を L と判定する', () => {
+  const proj = routeProjection([139.001, 35.0001], [
+    [139.0, 35.0],
+    [139.002, 35.0]
+  ]);
+  assert.equal(proj.side, 'L');
+  assert.ok(proj.perpMeters > 0);
+});
+
+test('Route Math: routeProjection は東進ルートで南側の点を R と判定する', () => {
+  const proj = routeProjection([139.001, 34.9999], [
+    [139.0, 35.0],
+    [139.002, 35.0]
+  ]);
+  assert.equal(proj.side, 'R');
+});
+
+test('Route Math: routeProjection は北進ルートで東側の点を R と判定する', () => {
+  const proj = routeProjection([139.0001, 35.001], [
+    [139.0, 35.0],
+    [139.0, 35.002]
+  ]);
+  assert.equal(proj.side, 'R');
+});
+
+test('Route Math: routeProjection は累計距離 (alongMeters) を正しく計算する', () => {
+  const coords = [
+    [139.0, 35.0],
+    [139.002, 35.0],
+    [139.004, 35.0]
+  ];
+  const cum = cumulativeDistancesMeters(coords);
+  // Project to mid of segment 2 -> alongMeters ≈ cum[1] + segment2Length/2 ≈ cum[1] + (cum[2]-cum[1])/2
+  const proj = routeProjection([139.003, 35.0], coords, cum);
+  assert.equal(proj.segmentIndex, 1);
+  const expected = cum[1] + (cum[2] - cum[1]) * 0.5;
+  assert.ok(Math.abs(proj.alongMeters - expected) < 1);
+});
+
+test('Route Math: routeProjection は経路が短すぎると null を返す', () => {
+  assert.equal(routeProjection([139.0, 35.0], [[139.0, 35.0]]), null);
+  assert.equal(routeProjection([139.0, 35.0], []), null);
+});
+
+test('Route Math: routeProjection は不正な点で null を返す', () => {
+  const coords = [[139.0, 35.0], [139.001, 35.0]];
+  assert.equal(routeProjection([Number.NaN, 35.0], coords), null);
+  assert.equal(routeProjection(null, coords), null);
 });

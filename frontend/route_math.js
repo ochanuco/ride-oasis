@@ -150,12 +150,99 @@
     return Math.abs(diff) <= halfConeDeg;
   }
 
+  /** Returns cumulative meters [0, d1, d1+d2, ...] from the start of the route to each vertex. */
+  function cumulativeDistancesMeters(coordinates) {
+    if (!Array.isArray(coordinates) || coordinates.length === 0) return [];
+    const out = [0];
+    for (let i = 1; i < coordinates.length; i += 1) {
+      out.push(out[i - 1] + pointToPointDistanceMeters(coordinates[i - 1], coordinates[i]));
+    }
+    return out;
+  }
+
+  /**
+   * Projects a lon/lat point onto a polyline route and returns the closest segment
+   * along with cumulative meters from the start, perpendicular meters off the route,
+   * and side ('L' / 'R' / 'C') relative to the local direction of travel.
+   *
+   * The route is interpreted as the direction-of-travel order (start -> goal).
+   * `cumulative`, when provided, must match `cumulativeDistancesMeters(coordinates)`
+   * and is reused to avoid recomputing the prefix sum on every call.
+   */
+  function routeProjection(point, coordinates, cumulative) {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+    if (
+      !Array.isArray(point) || point.length < 2 ||
+      !Number.isFinite(point[0]) || !Number.isFinite(point[1])
+    ) {
+      return null;
+    }
+
+    const referenceLat = meanLatitude(coordinates);
+    const projected = coordinates.map((coord) => projectLonLatToMeters(coord, referenceLat));
+    const p = projectLonLatToMeters(point, referenceLat);
+
+    let bestIndex = -1;
+    let bestT = 0;
+    let bestPerp = Number.POSITIVE_INFINITY;
+
+    for (let i = 1; i < projected.length; i += 1) {
+      const a = projected[i - 1];
+      const b = projected[i];
+      const abx = b[0] - a[0];
+      const aby = b[1] - a[1];
+      const ab2 = abx * abx + aby * aby;
+      if (ab2 === 0) continue;
+      const apx = p[0] - a[0];
+      const apy = p[1] - a[1];
+      const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / ab2));
+      const closestX = a[0] + abx * t;
+      const closestY = a[1] + aby * t;
+      const perp = Math.hypot(p[0] - closestX, p[1] - closestY);
+      if (perp < bestPerp) {
+        bestPerp = perp;
+        bestIndex = i - 1;
+        bestT = t;
+      }
+    }
+
+    if (bestIndex < 0) return null;
+
+    const cum = Array.isArray(cumulative) && cumulative.length === coordinates.length
+      ? cumulative
+      : cumulativeDistancesMeters(coordinates);
+    const segLen = cum[bestIndex + 1] - cum[bestIndex];
+    const alongMeters = cum[bestIndex] + segLen * bestT;
+
+    const a = projected[bestIndex];
+    const b = projected[bestIndex + 1];
+    const fx = b[0] - a[0];
+    const fy = b[1] - a[1];
+    const closestX = a[0] + fx * bestT;
+    const closestY = a[1] + fy * bestT;
+    const ox = p[0] - closestX;
+    const oy = p[1] - closestY;
+    const cross = fx * oy - fy * ox;
+    let side = 'C';
+    if (cross > 0) side = 'L';
+    else if (cross < 0) side = 'R';
+
+    return {
+      segmentIndex: bestIndex,
+      alongMeters,
+      perpMeters: bestPerp,
+      side
+    };
+  }
+
   return {
     computeBbox,
     expandBbox,
     pointToPointDistanceMeters,
     pointToRouteDistanceMeters,
     bearingDegrees,
-    isWithinHeadingDeg
+    isWithinHeadingDeg,
+    cumulativeDistancesMeters,
+    routeProjection
   };
 });

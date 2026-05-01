@@ -128,15 +128,21 @@
       </main>
 
       <aside class="results-sheet" id="results-sheet" aria-label="検索結果">
-        <button class="results-toggle" id="results-toggle" type="button" aria-expanded="false" aria-controls="results-body">
-          <span class="results-handle" aria-hidden="true"></span>
-          <span class="results-summary">
-            <span>結果</span>
-            <strong id="matched-count">-</strong>
-            <span class="results-summary-unit">件</span>
-          </span>
-          <span class="results-toggle-icon" aria-hidden="true">⌃</span>
-        </button>
+        <div class="results-header">
+          <button class="results-toggle" id="results-toggle" type="button" aria-expanded="false" aria-controls="results-body">
+            <span class="results-handle" aria-hidden="true"></span>
+            <span class="results-summary">
+              <span>結果</span>
+              <strong id="matched-count">-</strong>
+              <span class="results-summary-unit">件</span>
+            </span>
+            <span class="results-toggle-icon" aria-hidden="true">⌃</span>
+          </button>
+          <button id="cue-sheet-button" class="cue-sheet-button" type="button" disabled aria-label="キューシートを印刷">
+            <span aria-hidden="true">🖨</span>
+            <span>キューシート</span>
+          </button>
+        </div>
         <div class="results-body" id="results-body">
           <div class="results-filters">
             <fieldset class="chains result-filters chain-filters">
