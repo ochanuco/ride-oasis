@@ -58,9 +58,9 @@ test('export_d1_seed: sqlLiteral は文字列内のシングルクォートを2�
   assert.equal(sqlLiteral("''"), "''''''"); // 内側に '' があるので '''''' (6 quotes)
 });
 
-test('export_d1_seed: buildInsertHeader は全列を含む INSERT VALUES 句を返す', () => {
+test('export_d1_seed: buildInsertHeader は INSERT OR REPLACE で全列を含む VALUES 句を返す', () => {
   const header = buildInsertHeader();
-  assert.match(header, /^INSERT INTO supply_points \(supply_point_id, chain/);
+  assert.match(header, /^INSERT OR REPLACE INTO supply_points \(supply_point_id, chain/);
   assert.match(header, /\) VALUES$/);
   for (const col of COLUMNS) {
     assert.ok(header.includes(col), `missing column ${col}`);

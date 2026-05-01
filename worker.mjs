@@ -1,9 +1,15 @@
-import {
+// `lib/map_data.js` is CommonJS (shared with the Node dev server). Importing
+// the default export gives us the entire `module.exports` object, then we
+// destructure the helpers we need. Going through the default import is the
+// most portable way to consume CJS from ESM under Workers' bundler.
+import mapData from './lib/map_data.js';
+
+const {
   parseSupplyPointFilters,
   buildSupplyPointsQuery,
   toFeatureCollection,
   ValidationError
-} from './lib/map_data.js';
+} = mapData;
 
 const API_PATH = '/api/supply-points';
 const NAMED_PLACEHOLDER_RE = /:([A-Za-z_][A-Za-z0-9_]*)/g;
@@ -40,10 +46,22 @@ async function handleSupplyPoints(url, env) {
   });
 }
 
-/** Builds an error response with the right status for ValidationError vs unknown failures. */
+/**
+ * Builds an error response. ValidationError surfaces its message at 400; any
+ * other thrown value is logged for the operator and returned as a generic 500
+ * so SQL/internal details do not leak through the public API.
+ */
 function errorResponse(error) {
-  const status = error instanceof ValidationError ? 400 : 500;
-  return Response.json({ error: error?.message || String(error) }, { status });
+  if (error instanceof ValidationError) {
+    return Response.json({ error: error.message }, { status: 400 });
+  }
+  console.error('supply-points handler error', error);
+  return Response.json({ error: 'internal server error' }, { status: 500 });
+}
+
+/** Strips the response body to satisfy HEAD semantics while keeping status + headers. */
+function asHeadResponse(response) {
+  return new Response(null, { status: response.status, headers: response.headers });
 }
 
 export default {
@@ -57,15 +75,13 @@ export default {
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('method not allowed', { status: 405 });
       }
+      let response;
       try {
-        const response = await handleSupplyPoints(url, env);
-        if (request.method === 'HEAD') {
-          return new Response(null, { status: response.status, headers: response.headers });
-        }
-        return response;
+        response = await handleSupplyPoints(url, env);
       } catch (error) {
-        return errorResponse(error);
+        response = errorResponse(error);
       }
+      return request.method === 'HEAD' ? asHeadResponse(response) : response;
     }
     return env.ASSETS.fetch(request);
   }

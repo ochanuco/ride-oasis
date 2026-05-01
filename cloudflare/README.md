@@ -65,7 +65,7 @@ cron や schedule 化したい場合は `npm run cf:export-seed && npm run cf:se
 
 ローカルでは 2 系統が併存:
 
-- **Node 直 (推奨)**: `npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787` — SQLite を直接読む。wrangler 不要、`lib/map_data.js` を共有しているので挙動は Worker と同等。
+- **Node 直 (推奨)**: `npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787` — SQLite を直接読み込む。wrangler 不要、`lib/map_data.js` を共有しているので挙動は Worker と同等。
 - **Wrangler dev**: `npm run cf:dev` — D1 のローカル sqlite (.wrangler/state/) を使ったプレビュー。`npm run cf:migrate:local && npm run cf:seed:local` で初期化。
 
 ## 制限
