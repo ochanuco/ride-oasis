@@ -45,15 +45,23 @@
     return cachedParserClass;
   }
 
+  /** Returns true when lat/lon are finite and inside WGS84 valid ranges. */
+  function isValidLatLon(lat, lon) {
+    return Number.isFinite(lat)
+      && Number.isFinite(lon)
+      && lat >= -90 && lat <= 90
+      && lon >= -180 && lon <= 180;
+  }
+
   /**
    * Normalizes the fit-file-parser output into the route + course-points shape
    * the rest of ride-oasis consumes:
    *   { records: [{ lat, lon, distanceMeters? }], coursePoints: [{ lat, lon, distanceMeters?, name, type }] }
-   * Records / course points without finite lat+lon are dropped.
+   * Records / course points outside the valid lat/lon range are dropped.
    */
   function normalizeFitData(data) {
     const records = (Array.isArray(data?.records) ? data.records : [])
-      .filter((r) => Number.isFinite(r?.position_lat) && Number.isFinite(r?.position_long))
+      .filter((r) => isValidLatLon(r?.position_lat, r?.position_long))
       .map((r) => ({
         lat: r.position_lat,
         lon: r.position_long,
@@ -61,7 +69,7 @@
       }));
 
     const coursePoints = (Array.isArray(data?.course_points) ? data.course_points : [])
-      .filter((cp) => Number.isFinite(cp?.position_lat) && Number.isFinite(cp?.position_long))
+      .filter((cp) => isValidLatLon(cp?.position_lat, cp?.position_long))
       .map((cp) => ({
         lat: cp.position_lat,
         lon: cp.position_long,

@@ -45,6 +45,26 @@ test('FIT Parser: 不正な lat/lon を持つレコードを除外する', () =>
   assert.equal(out.coursePoints[0].name, 'OK');
 });
 
+test('FIT Parser: WGS84 範囲外の lat/lon を除外する', () => {
+  const out = normalizeFitData({
+    records: [
+      { position_lat: 35.0, position_long: 139.0 },
+      { position_lat: 999, position_long: 139.0 },
+      { position_lat: -91, position_long: 139.0 },
+      { position_lat: 35.0, position_long: 181 },
+      { position_lat: 35.0, position_long: -181 }
+    ],
+    course_points: [
+      { position_lat: 91, position_long: 0, name: 'NorthOfNorth' },
+      { position_lat: 35, position_long: 139, name: 'OK' }
+    ]
+  });
+  assert.equal(out.records.length, 1);
+  assert.equal(out.records[0].lat, 35);
+  assert.equal(out.coursePoints.length, 1);
+  assert.equal(out.coursePoints[0].name, 'OK');
+});
+
 test('FIT Parser: distance が無い record / course_point は distanceMeters: null になる', () => {
   const out = normalizeFitData({
     records: [{ position_lat: 35, position_long: 139 }],

@@ -743,6 +743,9 @@ async function handleRouteFile(event) {
     let parsedRoute;
     let coursePoints = [];
     if (isFit) {
+      if (!window.FitParser || typeof window.FitParser.parseFitArrayBuffer !== 'function') {
+        throw new Error('FIT パーサーの初期化に失敗しました。ページを再読み込みしてください');
+      }
       setStatus('FIT を読み込み中...');
       const buffer = await file.arrayBuffer();
       if (loadToken !== latestRouteLoadToken) return;
@@ -1252,7 +1255,10 @@ function bindEvents() {
   }
   window.addEventListener('resize', () => map.updateSize());
   map.on('singleclick', (event) => {
-    const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
+    const feature = map.forEachFeatureAtPixel(
+      event.pixel,
+      (candidate) => (candidate && candidate.get('properties') ? candidate : undefined)
+    );
     const supplyFeature = feature && feature.get('properties') ? feature : null;
     if (supplyFeature) {
       activatePoint(supplyFeature.get('properties').supply_point_id);
