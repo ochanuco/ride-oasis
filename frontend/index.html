@@ -58,6 +58,10 @@
               <span class="picker-label">ルートを選ぶ (GPX / FIT)</span>
               <input id="gpx-file" type="file" accept=".gpx,.fit,application/gpx+xml,text/xml,application/xml,application/octet-stream" />
             </label>
+            <form class="rwg-form" id="rwg-form" autocomplete="off">
+              <input id="rwg-url" type="text" placeholder="または RWG URL / ID" inputmode="url" autocomplete="off" />
+              <button type="submit" id="rwg-fetch" class="rwg-fetch">取得</button>
+            </form>
             <div class="ctx-meta">
               <span class="file-name" id="gpx-file-name">未選択</span>
               <span class="route-meta" id="route-point-count">経路点数: -</span>
@@ -180,6 +184,7 @@
     <script src="./route_math.js"></script>
     <script src="./gpx.js"></script>
     <script src="./fit.js"></script>
+    <script src="./rwg.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
