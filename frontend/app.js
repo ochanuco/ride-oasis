@@ -42,7 +42,8 @@ const elements = {
   resultsSheet: document.getElementById('results-sheet'),
   resultsToggle: document.getElementById('results-toggle'),
   cueSheetButton: document.getElementById('cue-sheet-button'),
-  gpxExportButton: document.getElementById('gpx-export-button')
+  gpxExportButton: document.getElementById('gpx-export-button'),
+  showCoursePoints: document.getElementById('show-course-points')
 };
 
 const CUE_SHEET_STORAGE_KEY = 'rideoasis-cue-sheet';
@@ -158,9 +159,11 @@ map.addOverlay(popupOverlay);
 let routeFeature = null;
 let routeCoordinates = [];
 let manualPoints = [];
+let cachedCoursePoints = [];
 let allMatchedPoints = [];
 let filteredPoints = [];
 let activeSupplyPointId = null;
+let activePopupKind = null;
 let previewSupplyPointId = null;
 const API_PAGE_LIMIT = 10000;
 const featureIndex = new Map();
@@ -350,6 +353,36 @@ function openPopupForFeature(feature) {
   popupOverlay.setPosition(feature.getGeometry().getCoordinates());
   elements.popupBody.innerHTML = buildPopupHtml(feature.get('properties'));
   elements.popup.hidden = false;
+  activePopupKind = 'supply';
+}
+
+/** Opens the popup for a clicked FIT course point with route projection info. */
+function activateCoursePoint(feature) {
+  const cp = feature.get('coursePoint');
+  if (!cp) return;
+  popupOverlay.setPosition(feature.getGeometry().getCoordinates());
+  let projLine = '';
+  if (routeCoordinates.length >= 2) {
+    const proj = window.RouteMath.routeProjection([cp.lon, cp.lat], routeCoordinates);
+    if (proj) {
+      const cumKm = (proj.alongMeters / 1000).toFixed(1);
+      const sideLabel = proj.side === 'L' ? '左' : proj.side === 'R' ? '右' : '・';
+      projLine = `<div class="popup-distance">累計 ${cumKm} km / ${sideLabel}側 / 離れ ${Math.round(proj.perpMeters)} m</div>`;
+    }
+  }
+  elements.popupBody.innerHTML = [
+    `<div class="popup-chain">${escapeHtml(cp.type || 'course point')}</div>`,
+    `<div class="popup-title">${escapeHtml(cp.name || '(無名)')}</div>`,
+    projLine
+  ].filter(Boolean).join('');
+  elements.popup.hidden = false;
+  activePopupKind = 'course-point';
+  // Course points are not part of the supply-point selection flow, so we
+  // explicitly clear any prior supply selection without closing this popup.
+  activeSupplyPointId = null;
+  previewSupplyPointId = null;
+  syncPointHighlight();
+  syncPointListSelection();
 }
 
 /** Marks one supply point active and opens its popup. */
@@ -390,6 +423,7 @@ function clearPopup() {
   previewSupplyPointId = null;
   elements.popup.hidden = true;
   popupOverlay.setPosition(undefined);
+  activePopupKind = null;
   syncPointHighlight();
   syncPointListSelection();
 }
@@ -458,6 +492,7 @@ function openCueSheet() {
     localStorage.setItem(CUE_SHEET_STORAGE_KEY, JSON.stringify({
       routeCoordinates,
       filteredPoints,
+      coursePoints: visibleCoursePoints(),
       distanceMeters: selectedDistanceMeters(),
       generatedAt: new Date().toISOString()
     }));
@@ -475,13 +510,14 @@ function clearRouteVisualSources() {
   endpointSource.clear();
   currentLocationSource.clear();
   coursePointSource.clear();
+  cachedCoursePoints = [];
 }
 
 /** Renders FIT course-point waypoints (PCs / aid stations / etc.) on the map. */
 function renderCoursePoints(points) {
   coursePointSource.clear();
-  if (!Array.isArray(points)) return;
-  for (const cp of points) {
+  cachedCoursePoints = Array.isArray(points) ? points.slice() : [];
+  for (const cp of cachedCoursePoints) {
     if (!Number.isFinite(cp?.lat) || !Number.isFinite(cp?.lon)) continue;
     const feature = new ol.Feature({
       geometry: new ol.geom.Point(ol.proj.fromLonLat([cp.lon, cp.lat]))
@@ -489,6 +525,15 @@ function renderCoursePoints(points) {
     feature.set('coursePoint', cp);
     coursePointSource.addFeature(feature);
   }
+  if (elements.showCoursePoints) {
+    coursePointLayer.setVisible(elements.showCoursePoints.checked);
+  }
+}
+
+/** Returns the cached course points filtered by the show-course-points toggle. */
+function visibleCoursePoints() {
+  if (elements.showCoursePoints && !elements.showCoursePoints.checked) return [];
+  return cachedCoursePoints.slice();
 }
 
 /** Renders the uploaded route and its start/end markers. */
@@ -1242,6 +1287,14 @@ function bindEvents() {
   if (elements.gpxExportButton) {
     elements.gpxExportButton.addEventListener('click', exportGpx);
   }
+  if (elements.showCoursePoints) {
+    elements.showCoursePoints.addEventListener('change', () => {
+      coursePointLayer.setVisible(elements.showCoursePoints.checked);
+      if (!elements.showCoursePoints.checked && activePopupKind === 'course-point') {
+        clearPopup();
+      }
+    });
+  }
   elements.resultsToggle.addEventListener('click', () => {
     if (desktopMediaQuery && desktopMediaQuery.matches) return;
     const expanded = elements.resultsSheet.classList.toggle('expanded');
@@ -1264,6 +1317,14 @@ function bindEvents() {
     );
     if (supplyFeature) {
       activatePoint(supplyFeature.get('properties').supply_point_id);
+      return;
+    }
+    const cpFeature = map.forEachFeatureAtPixel(
+      event.pixel,
+      (candidate) => (candidate && candidate.get('coursePoint') ? candidate : undefined)
+    );
+    if (cpFeature) {
+      activateCoursePoint(cpFeature);
       return;
     }
     clearPopup();
