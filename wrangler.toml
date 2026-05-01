@@ -3,6 +3,13 @@ main = "worker.mjs"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Custom domain と併用しても workers.dev / version preview URL を残す。
+# false にすると `<version-id>-ride-oasis.teacatus.workers.dev` も同時に
+# 無効化され Workers Builds の per-branch preview が機能しなくなるため、
+# 意図的に true で固定する。
+workers_dev = true
+preview_urls = true
+
 # Custom domain. The DNS record + worker route are managed in the Cloudflare
 # Dashboard (Workers & Pages → ride-oasis → Settings → Domains & Routes); this
 # entry mirrors that binding so `wrangler deploy` does not warn about an
