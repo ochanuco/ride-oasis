@@ -57,6 +57,7 @@ const routeSource = new ol.source.Vector();
 const pointSource = new ol.source.Vector();
 const endpointSource = new ol.source.Vector();
 const currentLocationSource = new ol.source.Vector();
+const coursePointSource = new ol.source.Vector();
 
 const routeLayer = new ol.layer.Vector({
   source: routeSource,
@@ -116,6 +117,20 @@ const currentLocationLayer = new ol.layer.Vector({
   })
 });
 
+const coursePointLayer = new ol.layer.Vector({
+  source: coursePointSource,
+  style: new ol.style.Style({
+    image: new ol.style.RegularShape({
+      points: 5,
+      radius: 9,
+      radius2: 4,
+      angle: 0,
+      fill: new ol.style.Fill({ color: '#c62f2f' }),
+      stroke: new ol.style.Stroke({ color: '#ffffff', width: 1.5 })
+    })
+  })
+});
+
 const map = new ol.Map({
   target: 'map',
   layers: [
@@ -123,7 +138,8 @@ const map = new ol.Map({
     routeLayer,
     pointLayer,
     endpointLayer,
-    currentLocationLayer
+    currentLocationLayer,
+    coursePointLayer
   ],
   view: new ol.View({
     center: ol.proj.fromLonLat([139.767, 35.681]),
@@ -453,11 +469,26 @@ function openCueSheet() {
   window.open('./print.html', '_blank', 'noopener');
 }
 
-/** Clears the three drawing sources used for route and location visuals. */
+/** Clears the drawing sources used for route, endpoints, current location, and FIT course points. */
 function clearRouteVisualSources() {
   routeSource.clear();
   endpointSource.clear();
   currentLocationSource.clear();
+  coursePointSource.clear();
+}
+
+/** Renders FIT course-point waypoints (PCs / aid stations / etc.) on the map. */
+function renderCoursePoints(points) {
+  coursePointSource.clear();
+  if (!Array.isArray(points)) return;
+  for (const cp of points) {
+    if (!Number.isFinite(cp?.lat) || !Number.isFinite(cp?.lon)) continue;
+    const feature = new ol.Feature({
+      geometry: new ol.geom.Point(ol.proj.fromLonLat([cp.lon, cp.lat]))
+    });
+    feature.set('coursePoint', cp);
+    coursePointSource.addFeature(feature);
+  }
 }
 
 /** Renders the uploaded route and its start/end markers. */
@@ -537,7 +568,7 @@ function findPointListItem(node) {
 function fitToVisibleData() {
   const extent = ol.extent.createEmpty();
   let hasData = false;
-  for (const source of [routeSource, pointSource, endpointSource, currentLocationSource]) {
+  for (const source of [routeSource, pointSource, endpointSource, currentLocationSource, coursePointSource]) {
     const sourceExtent = source.getExtent();
     if (sourceExtent && !ol.extent.isEmpty(sourceExtent)) {
       ol.extent.extend(extent, sourceExtent);
@@ -555,6 +586,19 @@ function createRouteFeatureFromGpx(gpxText) {
   return {
     coordinates: parsed.geometry.coordinates,
     feature: routeGeoJsonFormat.readFeature(parsed)
+  };
+}
+
+/** Builds an OpenLayers route feature from an ordered [lon, lat] coordinate array. */
+function createRouteFeatureFromCoords(coordinates) {
+  const geojson = {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates },
+    properties: { point_count: coordinates.length }
+  };
+  return {
+    coordinates,
+    feature: routeGeoJsonFormat.readFeature(geojson)
   };
 }
 
@@ -687,32 +731,54 @@ async function refreshMap(routeSnapshot = [...routeCoordinates]) {
   }
 }
 
-/** Reads the selected GPX file and refreshes the map candidates. */
-async function handleGpxFile(event) {
+/** Reads the selected route file (GPX or FIT) and refreshes the map candidates. */
+async function handleRouteFile(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  const isFit = /\.fit$/i.test(file.name);
   const loadToken = ++latestRouteLoadToken;
   cancelPendingRefreshes();
   const previousFileName = elements.gpxFileName.textContent;
   try {
-    const gpxText = await file.text();
-    if (loadToken !== latestRouteLoadToken) return;
-    const parsedRoute = createRouteFeatureFromGpx(gpxText);
+    let parsedRoute;
+    let coursePoints = [];
+    if (isFit) {
+      if (!window.FitParser || typeof window.FitParser.parseFitArrayBuffer !== 'function') {
+        throw new Error('FIT パーサーの初期化に失敗しました。ページを再読み込みしてください');
+      }
+      setStatus('FIT を読み込み中...');
+      const buffer = await file.arrayBuffer();
+      if (loadToken !== latestRouteLoadToken) return;
+      const fit = await window.FitParser.parseFitArrayBuffer(buffer);
+      if (loadToken !== latestRouteLoadToken) return;
+      if (fit.records.length < 2) {
+        throw new Error('FIT から 2 点以上の経路座標を抽出できませんでした');
+      }
+      const coords = fit.records.map((r) => [r.lon, r.lat]);
+      parsedRoute = createRouteFeatureFromCoords(coords);
+      coursePoints = fit.coursePoints;
+    } else {
+      const gpxText = await file.text();
+      if (loadToken !== latestRouteLoadToken) return;
+      parsedRoute = createRouteFeatureFromGpx(gpxText);
+    }
     if (loadToken !== latestRouteLoadToken) return;
     routeFeature = parsedRoute.feature;
     routeCoordinates = parsedRoute.coordinates;
     manualPoints = [];
     elements.gpxFileName.textContent = file.name;
     renderRoute(routeFeature);
+    renderCoursePoints(coursePoints);
     resetResults();
     updateRoutePointCount();
     fitToVisibleData();
-    setStatus(`GPX を読み込みました: ${file.name}`);
+    const cpInfo = coursePoints.length > 0 ? ` (PC ${coursePoints.length} 件)` : '';
+    setStatus(`${isFit ? 'FIT' : 'GPX'} を読み込みました: ${file.name}${cpInfo}`);
     await refreshMap([...routeCoordinates]);
   } catch (error) {
     if (loadToken !== latestRouteLoadToken) return;
     elements.gpxFileName.textContent = previousFileName;
-    setStatus(error?.message || 'GPX の読み込みに失敗しました');
+    setStatus(error?.message || 'ルートファイルの読み込みに失敗しました');
     console.error(error);
   }
 }
@@ -1125,7 +1191,7 @@ function bindEvents() {
   for (const input of document.querySelectorAll('.result-filters input[type="checkbox"]')) {
     input.addEventListener('change', applyResultFilters);
   }
-  elements.gpxFile.addEventListener('change', handleGpxFile);
+  elements.gpxFile.addEventListener('change', handleRouteFile);
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
   elements.followToggle.addEventListener('change', handleFollowToggle);
   elements.manualReset.addEventListener('click', resetManualState);
@@ -1189,8 +1255,13 @@ function bindEvents() {
   }
   window.addEventListener('resize', () => map.updateSize());
   map.on('singleclick', (event) => {
-    const feature = map.forEachFeatureAtPixel(event.pixel, (candidate) => candidate);
-    const supplyFeature = feature && feature.get('properties') ? feature : null;
+    const supplyFeature = map.forEachFeatureAtPixel(
+      event.pixel,
+      (candidate) => {
+        const props = candidate && candidate.get('properties');
+        return props && props.supply_point_id != null ? candidate : undefined;
+      }
+    );
     if (supplyFeature) {
       activatePoint(supplyFeature.get('properties').supply_point_id);
       return;
