@@ -18,6 +18,8 @@
     "cf:export-seed": "node scripts/export_d1_seed.js",
     "cf:dev": "wrangler dev",
     "cf:deploy": "wrangler deploy",
+    "cf:preview": "wrangler versions upload",
+    "cf:promote": "wrangler versions deploy",
     "cf:migrate:remote": "wrangler d1 migrations apply rideoasis-supply-points --remote",
     "cf:migrate:local": "wrangler d1 migrations apply rideoasis-supply-points --local",
     "cf:seed:remote": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --remote",

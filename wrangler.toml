@@ -1,4 +1,4 @@
-name = "ride-oasis-map"
+name = "ride-oasis"
 main = "worker.mjs"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
@@ -10,9 +10,9 @@ directory = "frontend"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# Cloudflare D1 binding holding the supply_points table. Run `wrangler d1 create
-# rideoasis-supply-points` once and paste the returned database_id below before
-# the first deploy. Local `wrangler dev --local` uses an in-memory copy.
+# Production D1 binding. Run `wrangler d1 create rideoasis-supply-points` once
+# and paste the returned database_id below before the first deploy. Local
+# `wrangler dev --local` uses an in-memory copy.
 [[d1_databases]]
 binding = "DB"
 database_name = "rideoasis-supply-points"
@@ -21,3 +21,9 @@ migrations_dir = "cloudflare/migrations"
 
 [observability]
 enabled = true
+
+# 非本番ブランチからのプレビューには `wrangler versions upload` を使う
+# (npm run cf:preview)。同じ ride-oasis Worker に新しい version が
+# 追加され、本番トラフィックは影響を受けないまま、その version 専用の
+# preview URL (<version-id>-ride-oasis.workers.dev) が返ってくる。
+# `wrangler versions deploy` を呼ぶまで本番への昇格は起きない。
