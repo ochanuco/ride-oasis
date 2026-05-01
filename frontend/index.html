@@ -2,73 +2,90 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RideOasis Supply Point Map</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/ol@9.2.4/ol.css"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#225ea8" />
+    <title>RideOasis Map</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.9.0/ol.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app">
-      <header class="topbar">
-        <div>
-          <h1>RideOasis Map</h1>
-          <p class="subtitle">位置と近傍距離だけ決めて、結果をあとから絞り込む</p>
-        </div>
-        <div class="status" id="status">経路を指定してください</div>
+      <header class="top-bar">
+        <h1 class="brand">
+          <span class="brand-mark" aria-hidden="true">●</span>
+          <span class="brand-text">RideOasis</span>
+        </h1>
+        <div class="status" id="status" role="status" aria-live="polite">経路を指定してください</div>
       </header>
 
-      <section class="panel geo-search-panel">
-        <form class="geo-search" id="geo-search-form" autocomplete="off">
-          <label class="geo-search-label" for="geo-search-input">地名で検索</label>
-          <input id="geo-search-input" type="search" placeholder="例: 箱根、富士河口湖、千葉県柏市" autocomplete="off" enterkeyhint="search" />
-          <button type="submit" id="geo-search-submit" class="geo-search-submit">検索</button>
+      <section class="search-row">
+        <form class="geo-search" id="geo-search-form" autocomplete="off" role="search">
+          <span class="geo-search-icon" aria-hidden="true">🔍</span>
+          <input
+            id="geo-search-input"
+            type="search"
+            placeholder="地名で検索 (例: 箱根)"
+            autocomplete="off"
+            enterkeyhint="search"
+            aria-label="地名で検索"
+          />
           <button id="geo-search-clear" type="button" class="geo-search-clear" hidden aria-label="検索語を消す">×</button>
+          <button type="submit" id="geo-search-submit" class="geo-search-submit">検索</button>
         </form>
-        <ul id="geo-search-results" class="geo-search-results" hidden></ul>
+        <ul id="geo-search-results" class="geo-search-results" hidden role="listbox"></ul>
       </section>
 
-      <section class="panel controls">
-        <fieldset class="source-mode">
-          <legend>ルートの指定</legend>
-          <label><input type="radio" name="source-mode" value="gpx" checked />GPX ファイル</label>
-          <label><input type="radio" name="source-mode" value="current" />現在地</label>
-          <label><input type="radio" name="source-mode" value="manual" />手動2点指定</label>
-        </fieldset>
-
-        <div class="source-panel" id="gpx-panel">
-          <label class="file-picker-button" for="gpx-file">
-            GPX を選ぶ
-            <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml" />
+      <section class="mode-bar">
+        <div class="mode-chips" role="radiogroup" aria-label="ルートの指定">
+          <label class="mode-chip">
+            <input type="radio" name="source-mode" value="gpx" checked />
+            <span>GPX</span>
           </label>
-          <div class="source-meta">
-            <div class="file-name" id="gpx-file-name">未選択</div>
-            <div class="route-meta" id="route-point-count">経路点数: -</div>
-          </div>
+          <label class="mode-chip">
+            <input type="radio" name="source-mode" value="current" />
+            <span>現在地</span>
+          </label>
+          <label class="mode-chip">
+            <input type="radio" name="source-mode" value="manual" />
+            <span>手動2点</span>
+          </label>
         </div>
 
-        <div class="source-panel" id="current-location-panel">
-          <div class="current-location-controls">
-            <button id="use-current-location" type="button" class="secondary-action">現在地を使う</button>
+        <div class="mode-context">
+          <div class="ctx-panel" id="gpx-panel">
+            <label class="picker-button" for="gpx-file">
+              <span class="picker-icon" aria-hidden="true">📁</span>
+              <span class="picker-label">GPX を選ぶ</span>
+              <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml" />
+            </label>
+            <div class="ctx-meta">
+              <span class="file-name" id="gpx-file-name">未選択</span>
+              <span class="route-meta" id="route-point-count">経路点数: -</span>
+            </div>
+          </div>
+
+          <div class="ctx-panel" id="current-location-panel">
+            <button id="use-current-location" type="button" class="primary-action">
+              <span aria-hidden="true">📍</span>
+              <span>現在地を使う</span>
+            </button>
             <label class="follow-toggle">
               <input id="follow-toggle" type="checkbox" />
               <span>追従モード (走行中の自動更新)</span>
             </label>
           </div>
-        </div>
 
-        <div class="source-panel" id="manual-panel">
-          <p class="manual-instructions" id="manual-instructions">地図をクリックして出発地と目的地を順に指定してください</p>
-          <button id="manual-reset" type="button" class="secondary-action">手動指定をリセット</button>
-        </div>
-
-        <fieldset class="distance-ladder">
-          <legend id="distance-threshold-label">近傍距離</legend>
-          <div class="distance-header">
-            <div class="distance-current" id="distance-current">1km</div>
+          <div class="ctx-panel" id="manual-panel">
+            <p class="manual-instructions" id="manual-instructions">地図をタップして 出発地 → 目的地 を指定</p>
+            <button id="manual-reset" type="button" class="secondary-action">リセット</button>
           </div>
+        </div>
+
+        <div class="distance-strip">
+          <label class="distance-label" for="distance-threshold">
+            <span>近傍距離</span>
+            <strong class="distance-current" id="distance-current">1km</strong>
+          </label>
           <input
             id="distance-threshold"
             type="range"
@@ -77,7 +94,7 @@
             step="1"
             value="3"
             list="distance-threshold-labels"
-            aria-labelledby="distance-threshold-label"
+            aria-label="近傍距離"
             aria-valuemin="100"
             aria-valuemax="10000"
           />
@@ -99,46 +116,53 @@
             <span>5km</span>
             <span>10km</span>
           </div>
-        </fieldset>
-      </section>
-
-      <section class="content">
-        <aside class="sidebar">
-          <details class="filter-panel">
-            <summary>絞り込み <span class="filter-summary-count">表示 <span id="matched-count">-</span></span></summary>
-            <fieldset class="chains result-filters chain-filters">
-              <legend>チェーン</legend>
-              <label><input type="checkbox" value="7eleven" checked />7-Eleven</label>
-              <label><input type="checkbox" value="lawson" checked />Lawson</label>
-              <label><input type="checkbox" value="familymart" checked />FamilyMart</label>
-              <label><input type="checkbox" value="daily_yamazaki" checked />Daily Yamazaki</label>
-              <label><input type="checkbox" value="ministop" checked />MINISTOP</label>
-              <label><input type="checkbox" value="michi_no_eki" checked />道の駅</label>
-            </fieldset>
-
-            <fieldset class="chains result-filters precision-filters">
-              <legend>位置の確かさ</legend>
-              <label><input type="checkbox" name="precision-filter" value="precise" checked />正確</label>
-              <label><input type="checkbox" name="precision-filter" value="rough" checked />あいまい</label>
-            </fieldset>
-          </details>
-
-          <div class="point-list" id="point-list"></div>
-        </aside>
-        <div class="map-shell">
-          <div class="map" id="map"></div>
-          <div class="popup" id="popup" hidden>
-            <button class="popup-close" id="popup-close" type="button">×</button>
-            <div class="popup-body" id="popup-body"></div>
-          </div>
         </div>
       </section>
+
+      <main class="map-shell">
+        <div class="map" id="map"></div>
+        <div class="popup" id="popup" hidden>
+          <button class="popup-close" id="popup-close" type="button" aria-label="閉じる">×</button>
+          <div class="popup-body" id="popup-body"></div>
+        </div>
+      </main>
+
+      <aside class="results-sheet" id="results-sheet" aria-label="検索結果">
+        <button class="results-toggle" id="results-toggle" type="button" aria-expanded="false" aria-controls="results-body">
+          <span class="results-handle" aria-hidden="true"></span>
+          <span class="results-summary">
+            <span>結果</span>
+            <strong id="matched-count">-</strong>
+            <span class="results-summary-unit">件</span>
+          </span>
+          <span class="results-toggle-icon" aria-hidden="true">⌃</span>
+        </button>
+        <div class="results-body" id="results-body">
+          <div class="results-filters">
+            <fieldset class="chains result-filters chain-filters">
+              <legend>チェーン</legend>
+              <label><input type="checkbox" value="7eleven" checked /><span>7-Eleven</span></label>
+              <label><input type="checkbox" value="lawson" checked /><span>Lawson</span></label>
+              <label><input type="checkbox" value="familymart" checked /><span>FamilyMart</span></label>
+              <label><input type="checkbox" value="daily_yamazaki" checked /><span>Daily</span></label>
+              <label><input type="checkbox" value="ministop" checked /><span>MINISTOP</span></label>
+              <label><input type="checkbox" value="michi_no_eki" checked /><span>道の駅</span></label>
+            </fieldset>
+            <fieldset class="chains result-filters precision-filters">
+              <legend>位置の確かさ</legend>
+              <label><input type="checkbox" name="precision-filter" value="precise" checked /><span>正確</span></label>
+              <label><input type="checkbox" name="precision-filter" value="rough" checked /><span>あいまい</span></label>
+            </fieldset>
+          </div>
+          <div class="point-list" id="point-list"></div>
+        </div>
+      </aside>
     </div>
 
     <script>
       window.RIDEOASIS_API_BASE = window.RIDEOASIS_API_BASE || "/api";
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/ol@9.2.4/dist/ol.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ol@10.9.0/dist/ol.js"></script>
     <script src="./route_math.js"></script>
     <script src="./gpx.js"></script>
     <script src="./app.js"></script>
