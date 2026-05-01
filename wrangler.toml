@@ -3,6 +3,14 @@ main = "worker.mjs"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Custom domain. The DNS record + worker route are managed in the Cloudflare
+# Dashboard (Workers & Pages → ride-oasis → Settings → Domains & Routes); this
+# entry mirrors that binding so `wrangler deploy` does not warn about an
+# unknown route, and so reviewers can see where the Worker is actually served.
+[[routes]]
+pattern = "oasis.ochanu.co"
+custom_domain = true
+
 # Static frontend served straight from frontend/. The Worker only intercepts
 # the supply-point API; everything else falls through to the asset bundle.
 [assets]
