@@ -41,7 +41,8 @@ const elements = {
   geoSearchResults: document.getElementById('geo-search-results'),
   resultsSheet: document.getElementById('results-sheet'),
   resultsToggle: document.getElementById('results-toggle'),
-  cueSheetButton: document.getElementById('cue-sheet-button')
+  cueSheetButton: document.getElementById('cue-sheet-button'),
+  gpxExportButton: document.getElementById('gpx-export-button')
 };
 
 const CUE_SHEET_STORAGE_KEY = 'rideoasis-cue-sheet';
@@ -382,11 +383,56 @@ function updateSummary(visibleCount) {
   elements.matchedCount.textContent = String(visibleCount);
 }
 
-/** Enables the cue-sheet button only when a route and matched results exist. */
+/** Enables the cue-sheet and GPX-export buttons only when a route and matched results exist. */
 function syncCueSheetButton() {
-  if (!elements.cueSheetButton) return;
   const ready = routeCoordinates.length >= 2 && filteredPoints.length > 0;
-  elements.cueSheetButton.disabled = !ready;
+  if (elements.cueSheetButton) elements.cueSheetButton.disabled = !ready;
+  if (elements.gpxExportButton) elements.gpxExportButton.disabled = !ready;
+}
+
+/** Builds and downloads a GPX 1.1 document with the current route and matched supply points. */
+function exportGpx() {
+  if (routeCoordinates.length < 2 || filteredPoints.length === 0) return;
+  const cum = window.RouteMath.cumulativeDistancesMeters(routeCoordinates);
+  const waypoints = filteredPoints.map((feature) => {
+    const [lon, lat] = feature.geometry.coordinates;
+    const props = feature.properties || {};
+    const proj = window.RouteMath.routeProjection(feature.geometry.coordinates, routeCoordinates, cum);
+    const sideLabel = proj?.side === 'L' ? '左' : proj?.side === 'R' ? '右' : '';
+    const cumKm = proj ? (proj.alongMeters / 1000).toFixed(1) : null;
+    const descParts = [];
+    if (cumKm !== null) descParts.push(`累計 ${cumKm}km`);
+    if (sideLabel) descParts.push(`${sideLabel}側`);
+    if (proj) descParts.push(`離れ ${Math.round(proj.perpMeters)}m`);
+    if (props.address_norm) descParts.push(props.address_norm);
+    return {
+      lat,
+      lon,
+      name: `${props.chain || ''}: ${props.name || ''}`.trim().replace(/^:\s*/, ''),
+      desc: descParts.join(' / '),
+      type: props.chain || 'supply'
+    };
+  });
+
+  const xml = window.GpxParser.buildGpxText({
+    name: 'RideOasis Supply Points',
+    creator: 'RideOasis',
+    generatedAt: new Date().toISOString(),
+    route: routeCoordinates,
+    waypoints
+  });
+
+  const blob = new Blob([xml], { type: 'application/gpx+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  anchor.href = url;
+  anchor.download = `rideoasis-${stamp}.gpx`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+  setStatus(`GPX を書き出しました (${waypoints.length} 件)`);
 }
 
 /** Serializes the current cue-sheet input and opens the printable page. */
@@ -1126,6 +1172,9 @@ function bindEvents() {
   elements.popupClose.addEventListener('click', clearPopup);
   if (elements.cueSheetButton) {
     elements.cueSheetButton.addEventListener('click', openCueSheet);
+  }
+  if (elements.gpxExportButton) {
+    elements.gpxExportButton.addEventListener('click', exportGpx);
   }
   elements.resultsToggle.addEventListener('click', () => {
     if (desktopMediaQuery && desktopMediaQuery.matches) return;
