@@ -615,7 +615,15 @@ input[type="search"]::-webkit-search-cancel-button {
   gap: 2px;
 }
 
+.elevation-chart[hidden] {
+  display: none;
+}
+
 .elevation-chart canvas {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  display: block;
   cursor: crosshair;
 }
 
@@ -662,17 +670,6 @@ input[type="search"]::-webkit-search-cancel-button {
   opacity: 0.92;
   border-color: var(--c-accent);
   box-shadow: 0 4px 12px rgba(34, 94, 168, 0.18);
-}
-
-.elevation-chart[hidden] {
-  display: none;
-}
-
-.elevation-chart canvas {
-  flex: 1;
-  width: 100%;
-  height: 100%;
-  display: block;
 }
 
 .elevation-meta {

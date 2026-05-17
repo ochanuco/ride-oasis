@@ -202,6 +202,12 @@ let hoverPointerKind = null;
 let lastChartTotalMeters = null;
 let hoverPreviewOasisKey = null;
 let oasisChartDotsCache = { route: null, filtered: null, dots: [] };
+let coursePointChartDotsCache = {
+  route: null,
+  coursePoints: null,
+  disabledTypes: null,
+  dots: []
+};
 let manualPoints = [];
 let cachedCoursePoints = [];
 let disabledCoursePointTypes = new Set();
@@ -574,6 +580,7 @@ function renderCoursePoints(points) {
   coursePointSource.clear();
   cachedCoursePoints = Array.isArray(points) ? points.slice() : [];
   disabledCoursePointTypes = new Set();
+  coursePointChartDotsCache.coursePoints = null;
   for (const cp of cachedCoursePoints) {
     if (!Number.isFinite(cp?.lat) || !Number.isFinite(cp?.lon)) continue;
     const feature = new ol.Feature({
@@ -629,6 +636,8 @@ function rebuildCoursePointTypeChips() {
       if (input.checked) disabledCoursePointTypes.delete(type);
       else disabledCoursePointTypes.add(type);
       coursePointLayer.changed();
+      coursePointChartDotsCache.coursePoints = null;
+      renderElevationChart();
       if (!input.checked && activePopupKind === 'course-point' && activeCoursePointType === type) {
         clearPopup();
       }
@@ -912,39 +921,97 @@ function getOasisChartDots() {
   return dots;
 }
 
-/** Renders the elevation profile in the bottom-of-map overlay (or hides it). */
-function renderElevationChart() {
-  const container = elements.elevationChart;
-  const canvas = elements.elevationCanvas;
-  if (!container || !canvas) return;
+/**
+ * Projects each currently visible course point (FIT/RWG ★) onto the active
+ * route so the chart can plot them alongside the Oasis dots. Cached by
+ * reference so chart redraws during hover stay cheap; the cache invalidates
+ * whenever the route or the visibility filters change.
+ */
+function getCoursePointChartDots() {
+  if (
+    coursePointChartDotsCache.route === routeCoordinates
+    && coursePointChartDotsCache.coursePoints === cachedCoursePoints
+    && coursePointChartDotsCache.disabledTypes === disabledCoursePointTypes
+    && coursePointChartDotsCache.masterVisible === (elements.showCoursePoints?.checked ?? true)
+  ) {
+    return coursePointChartDotsCache.dots;
+  }
+  const dots = [];
+  const visible = visibleCoursePoints();
+  if (
+    visible.length > 0
+    && routeCoordinates.length >= 2
+    && routeElevationSeries
+    && routeCumulativeMeters.length === routeCoordinates.length
+  ) {
+    for (const cp of visible) {
+      if (!Number.isFinite(cp?.lat) || !Number.isFinite(cp?.lon)) continue;
+      const proj = window.RouteMath.routeProjection([cp.lon, cp.lat], routeCoordinates, routeCumulativeMeters);
+      if (!proj) continue;
+      const elevation = elevationAtRouteMeters(proj.alongMeters);
+      if (!Number.isFinite(elevation)) continue;
+      dots.push({ alongMeters: proj.alongMeters, elevation, cp });
+    }
+  }
+  coursePointChartDotsCache = {
+    route: routeCoordinates,
+    coursePoints: cachedCoursePoints,
+    disabledTypes: disabledCoursePointTypes,
+    masterVisible: elements.showCoursePoints?.checked ?? true,
+    dots
+  };
+  return dots;
+}
 
-  if (routeCoordinates.length < 2 || routeElevations.length < 2) {
+/**
+ * Refreshes `routeCumulativeMeters` and `routeElevationSeries` from the
+ * current route. Call this once whenever the route is replaced — the rest of
+ * the chart code (renderElevationChart, hover handlers, projection helpers)
+ * reads the cached values so pointermove never has to redo this O(N) work.
+ *
+ * Also clears the active hover position when the route's total length changes,
+ * since stale cumulative meters from the previous route do not map to the
+ * same point on the new route.
+ */
+function rebuildRouteElevationCache() {
+  if (routeCoordinates.length < 2) {
     routeCumulativeMeters = [];
     routeElevationSeries = null;
+    lastChartTotalMeters = null;
     hoverCumulativeMeters = null;
     hoverPointerKind = null;
     hoverMarkerSource.clear();
-    container.hidden = true;
     return;
   }
   routeCumulativeMeters = window.RouteMath.cumulativeDistancesMeters(routeCoordinates);
-  routeElevationSeries = buildElevationSeries(routeElevations, routeCumulativeMeters);
+  routeElevationSeries = routeElevations.length >= 2
+    ? buildElevationSeries(routeElevations, routeCumulativeMeters)
+    : null;
   if (!routeElevationSeries) {
+    lastChartTotalMeters = null;
     hoverCumulativeMeters = null;
     hoverPointerKind = null;
     hoverMarkerSource.clear();
-    lastChartTotalMeters = null;
-    container.hidden = true;
     return;
   }
-  // Route swap detection: if total length changed, the previous hover position
-  // no longer maps to the same point. Drop it before redraw.
   if (lastChartTotalMeters !== null && lastChartTotalMeters !== routeElevationSeries.totalDistanceMeters) {
     hoverCumulativeMeters = null;
     hoverPointerKind = null;
     hoverMarkerSource.clear();
   }
   lastChartTotalMeters = routeElevationSeries.totalDistanceMeters;
+}
+
+/** Renders the elevation profile in the bottom-of-map overlay (or hides it). */
+function renderElevationChart() {
+  const container = elements.elevationChart;
+  const canvas = elements.elevationCanvas;
+  if (!container || !canvas) return;
+
+  if (!routeElevationSeries || routeCumulativeMeters.length < 2) {
+    container.hidden = true;
+    return;
+  }
   container.hidden = false;
 
   const rect = canvas.getBoundingClientRect();
@@ -1048,6 +1115,27 @@ function renderElevationChart() {
       ctx.fillStyle = isActive ? '#9e3d22' : '#12836b';
       ctx.beginPath();
       ctx.arc(x, y, isActive ? 4 : 2.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // Course points (FIT/RWG ★) projected onto the elevation profile. Drawn as
+  // diamond-ish red dots so they read distinctly from the round oasis dots.
+  const cpDots = getCoursePointChartDots();
+  if (cpDots.length > 0) {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#c62f2f';
+    for (const dot of cpDots) {
+      const x = xFromMeters(Math.max(0, Math.min(dot.alongMeters, totalMeters)));
+      const y = yFromValue(dot.elevation);
+      ctx.beginPath();
+      ctx.moveTo(x, y - 4);
+      ctx.lineTo(x + 3.5, y);
+      ctx.lineTo(x, y + 4);
+      ctx.lineTo(x - 3.5, y);
+      ctx.closePath();
       ctx.fill();
       ctx.stroke();
     }
@@ -1348,11 +1436,25 @@ function bindRouteHoverLinks() {
         return candidate;
       });
       clearHoverPreview();
-      hideLinkedTip();
       if (cpFeature) {
-        showHoverTip(buildCoursePointHoverHtml(cpFeature.get('coursePoint')), clientX, clientY);
+        const cp = cpFeature.get('coursePoint');
+        const html = buildCoursePointHoverHtml(cp);
+        showHoverTip(html, clientX, clientY);
+        // Linked tooltip near the corresponding chart course-point dot.
+        if (routeElevationSeries && cp && Number.isFinite(cp.lat) && Number.isFinite(cp.lon)) {
+          const proj = window.RouteMath.routeProjection([cp.lon, cp.lat], routeCoordinates, routeCumulativeMeters);
+          if (proj) {
+            const elevation = elevationAtRouteMeters(proj.alongMeters);
+            if (Number.isFinite(elevation)) {
+              const pos = chartDotViewportXY(proj.alongMeters, elevation);
+              if (pos) showLinkedTip(html, pos.x, pos.y);
+              else hideLinkedTip();
+            } else hideLinkedTip();
+          } else hideLinkedTip();
+        } else hideLinkedTip();
       } else {
         hideHoverTip();
+        hideLinkedTip();
       }
     }
 
@@ -1400,18 +1502,18 @@ function bindRouteHoverLinks() {
       if (!(rect.width > 0)) return;
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      // Chart x padding mirrors padLeft (32) / padRight (6) in renderElevationChart.
-      const ratio = Math.max(0, Math.min(1, (x - 32) / Math.max(rect.width - 38, 1)));
+      const plotW = Math.max(rect.width - CHART_PAD_LEFT - CHART_PAD_RIGHT, 1);
+      const ratio = Math.max(0, Math.min(1, (x - CHART_PAD_LEFT) / plotW));
       const total = routeCumulativeMeters[routeCumulativeMeters.length - 1] || 0;
       setHoverCumulativeMeters(ratio * total, 'chart');
 
-      const dot = findChartDotNear(rect, x, y);
-      if (dot && dot.id != null) {
-        const feature = findPointFeature(dot.id);
+      const hit = findChartDotNear(rect, x, y);
+      if (hit && hit.kind === 'oasis' && hit.dot.id != null) {
+        const feature = findPointFeature(hit.dot.id);
         if (feature) {
           const html = buildOasisHoverHtml(feature.get('properties'));
           showHoverTip(html, event.clientX, event.clientY);
-          setHoverPreviewOasis(dot.id);
+          setHoverPreviewOasis(hit.dot.id);
           const coord = feature.getGeometry().getCoordinates();
           const lonLat = ol.proj.toLonLat(coord);
           const pos = mapMarkerViewportXY(lonLat[0], lonLat[1]);
@@ -1419,6 +1521,15 @@ function bindRouteHoverLinks() {
           else hideLinkedTip();
           return;
         }
+      } else if (hit && hit.kind === 'course') {
+        const cp = hit.dot.cp;
+        const html = buildCoursePointHoverHtml(cp);
+        showHoverTip(html, event.clientX, event.clientY);
+        clearHoverPreview();
+        const pos = mapMarkerViewportXY(cp.lon, cp.lat);
+        if (pos) showLinkedTip(html, pos.x, pos.y);
+        else hideLinkedTip();
+        return;
       }
       clearHoverPreview();
       hideHoverTip();
@@ -1435,28 +1546,42 @@ function bindRouteHoverLinks() {
 }
 
 /**
- * Returns the chart dot closest to the cursor's X position. The cursor's Y is
- * ignored on purpose — the user only needs to sweep horizontally along the
- * route to surface any Oasis at that distance, regardless of where the dot
- * lands on the elevation curve. `rect` is the canvas bounding rect; (x, _y)
- * are cursor coords relative to that rect.
+ * Returns the chart dot closest to the cursor's X position, tagged with its
+ * kind so the caller can dispatch tooltip + linked-tooltip logic. The cursor's
+ * Y is ignored on purpose — the user only needs to sweep horizontally along
+ * the route to surface any point at that distance, regardless of where the
+ * dot lands on the elevation curve. `rect` is the canvas bounding rect;
+ * (x, _y) are cursor coords relative to that rect.
+ *
+ * Both Oasis dots and course-point dots are eligible; ties on X distance fall
+ * back to course points (they tend to be sparser and more "intentional" — a
+ * brevet PC takes priority over a random convenience store next to it).
  */
 function findChartDotNear(rect, x, _y) {
-  const dots = getOasisChartDots();
-  if (!dots.length || !routeElevationSeries) return null;
-  const padLeft = CHART_PAD_LEFT;
-  const padRight = CHART_PAD_RIGHT;
-  const plotW = Math.max(rect.width - padLeft - padRight, 1);
+  if (!routeElevationSeries) return null;
+  const plotW = Math.max(rect.width - CHART_PAD_LEFT - CHART_PAD_RIGHT, 1);
   const totalMeters = routeElevationSeries.totalDistanceMeters || 1;
-  const toX = (m) => padLeft + (Math.max(0, Math.min(m, totalMeters)) / totalMeters) * plotW;
+  const toX = (m) => CHART_PAD_LEFT + (Math.max(0, Math.min(m, totalMeters)) / totalMeters) * plotW;
 
   const xTolerance = 6;
+  // Course points first — they're sparser and more "intentional" (turn /
+  // PC / finish markers), so if one is within tolerance prefer it even if an
+  // adjacent Oasis is a pixel closer. Only fall back to Oasis when no course
+  // point is in range.
   let best = null;
   let bestDx = Infinity;
-  for (const dot of dots) {
+  for (const dot of getCoursePointChartDots()) {
     const dx = Math.abs(toX(dot.alongMeters) - x);
     if (dx <= xTolerance && dx < bestDx) {
-      best = dot;
+      best = { kind: 'course', dot };
+      bestDx = dx;
+    }
+  }
+  if (best) return best;
+  for (const dot of getOasisChartDots()) {
+    const dx = Math.abs(toX(dot.alongMeters) - x);
+    if (dx <= xTolerance && dx < bestDx) {
+      best = { kind: 'oasis', dot };
       bestDx = dx;
     }
   }
@@ -1663,6 +1788,7 @@ async function handleRouteFile(event) {
     routeFeature = parsedRoute.feature;
     routeCoordinates = parsedRoute.coordinates;
     routeElevations = parsedRoute.elevations || [];
+    rebuildRouteElevationCache();
     manualPoints = [];
     currentRwgId = null;
     elements.gpxFileName.textContent = file.name;
@@ -1715,6 +1841,7 @@ async function handleRwgFetch(event) {
     routeFeature = parsedRoute.feature;
     routeCoordinates = parsedRoute.coordinates;
     routeElevations = parsedRoute.elevations || [];
+    rebuildRouteElevationCache();
     manualPoints = [];
     const displayName = rwg.name || `RWG #${id}`;
     elements.gpxFileName.textContent = displayName;
@@ -1754,6 +1881,7 @@ async function handleManualMapClick(mapCoord) {
     routeFeature = null;
     routeCoordinates = [];
     routeElevations = [];
+    rebuildRouteElevationCache();
     resetResults();
     updateRoutePointCount();
     renderElevationChart();
@@ -1764,6 +1892,7 @@ async function handleManualMapClick(mapCoord) {
   routeFeature = routeSource.getFeatures()[0] || null;
   routeCoordinates = manualPoints.map((coord) => [coord[0], coord[1]]);
   routeElevations = [];
+  rebuildRouteElevationCache();
   resetResults();
   updateRoutePointCount();
   fitToVisibleData();
@@ -1780,6 +1909,7 @@ function resetManualState() {
   routeFeature = null;
   routeCoordinates = [];
   routeElevations = [];
+  rebuildRouteElevationCache();
   ++latestRouteLoadToken;
   cancelPendingRefreshes();
   clearRouteVisualSources();
@@ -1814,6 +1944,7 @@ async function handleCurrentLocation() {
     routeFeature = null;
     routeCoordinates = [coord];
     routeElevations = [];
+    rebuildRouteElevationCache();
     manualPoints = [];
     renderCurrentLocation(coord);
     resetResults();
@@ -1882,6 +2013,7 @@ async function handleFollowPositionAsync(position) {
   routeFeature = null;
   routeCoordinates = [coord];
   routeElevations = [];
+  rebuildRouteElevationCache();
   renderCurrentLocation(coord);
   updateRoutePointCount();
 
@@ -2073,6 +2205,7 @@ async function searchAtPlace(item) {
   routeFeature = null;
   routeCoordinates = [coord];
   routeElevations = [];
+  rebuildRouteElevationCache();
   renderCurrentLocation(coord);
   resetResults();
   updateRoutePointCount();
@@ -2290,6 +2423,8 @@ function bindEvents() {
   if (elements.showCoursePoints) {
     elements.showCoursePoints.addEventListener('change', () => {
       coursePointLayer.setVisible(elements.showCoursePoints.checked);
+      coursePointChartDotsCache.coursePoints = null;
+      renderElevationChart();
       if (!elements.showCoursePoints.checked && activePopupKind === 'course-point') {
         clearPopup();
       }
