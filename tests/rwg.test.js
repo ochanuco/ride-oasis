@@ -36,7 +36,7 @@ test('RWG: normalizeRwgData は track_points / course_points / POI を統合す�
   const data = {
     name: '神戸-伊勢',
     track_points: [
-      { x: 139.0, y: 35.0, d: 0 },
+      { x: 139.0, y: 35.0, d: 0, e: 12.3 },
       { x: 139.001, y: 35.001, d: 150 }
     ],
     course_points: [
@@ -54,7 +54,8 @@ test('RWG: normalizeRwgData は track_points / course_points / POI を統合す�
   const out = normalizeRwgData(data);
   assert.equal(out.name, '神戸-伊勢');
   assert.equal(out.records.length, 2);
-  assert.deepEqual(out.records[0], { lat: 35.0, lon: 139.0, distanceMeters: 0 });
+  assert.deepEqual(out.records[0], { lat: 35.0, lon: 139.0, distanceMeters: 0, elevationMeters: 12.3 });
+  assert.equal(out.records[1].elevationMeters, null);
   assert.equal(out.coursePoints.length, 2);
   assert.equal(out.coursePoints[0].name, '右折');
   assert.equal(out.coursePoints[0].type, 'right');

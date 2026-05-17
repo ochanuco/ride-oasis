@@ -598,6 +598,92 @@ input[type="search"]::-webkit-search-cancel-button {
   display: none;
 }
 
+.elevation-chart {
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: var(--space-2);
+  height: 88px;
+  padding: 6px 10px 4px;
+  background: color-mix(in oklab, var(--c-surface) 92%, transparent);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.elevation-chart canvas {
+  cursor: crosshair;
+}
+
+.hover-tip {
+  position: fixed;
+  z-index: 50;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+  max-width: 260px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.hover-tip[hidden] {
+  display: none;
+}
+
+.hover-tip-chain {
+  color: var(--c-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hover-tip-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.hover-tip-meta {
+  color: var(--c-ink-muted);
+  font-size: 11px;
+}
+
+.hover-tip-linked {
+  opacity: 0.92;
+  border-color: var(--c-accent);
+  box-shadow: 0 4px 12px rgba(34, 94, 168, 0.18);
+}
+
+.elevation-chart[hidden] {
+  display: none;
+}
+
+.elevation-chart canvas {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.elevation-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--c-ink-muted);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
 .popup-close {
   position: absolute;
   top: 6px;

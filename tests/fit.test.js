@@ -6,7 +6,7 @@ const { normalizeFitData, parseFitArrayBuffer, _resetCacheForTests } = require('
 test('FIT Parser: records と course_points を内部形式に正規化する', () => {
   const data = {
     records: [
-      { position_lat: 35.0, position_long: 139.0, distance: 0 },
+      { position_lat: 35.0, position_long: 139.0, distance: 0, altitude: 12.5 },
       { position_lat: 35.1, position_long: 139.1, distance: 1234.5 }
     ],
     course_points: [
@@ -15,8 +15,8 @@ test('FIT Parser: records と course_points を内部形式に正規化する', 
   };
   const out = normalizeFitData(data);
   assert.equal(out.records.length, 2);
-  assert.deepEqual(out.records[0], { lat: 35.0, lon: 139.0, distanceMeters: 0 });
-  assert.deepEqual(out.records[1], { lat: 35.1, lon: 139.1, distanceMeters: 1234.5 });
+  assert.deepEqual(out.records[0], { lat: 35.0, lon: 139.0, distanceMeters: 0, elevationMeters: 12.5 });
+  assert.deepEqual(out.records[1], { lat: 35.1, lon: 139.1, distanceMeters: 1234.5, elevationMeters: null });
   assert.equal(out.coursePoints.length, 1);
   assert.deepEqual(out.coursePoints[0], {
     lat: 35.5,
@@ -71,7 +71,21 @@ test('FIT Parser: distance が無い record / course_point は distanceMeters: n
     course_points: [{ position_lat: 35.5, position_long: 139.5 }]
   });
   assert.equal(out.records[0].distanceMeters, null);
+  assert.equal(out.records[0].elevationMeters, null);
   assert.equal(out.coursePoints[0].distanceMeters, null);
+});
+
+test('FIT Parser: enhanced_altitude を優先しつつ altitude にフォールバックする', () => {
+  const out = normalizeFitData({
+    records: [
+      { position_lat: 35, position_long: 139, altitude: 10, enhanced_altitude: 11 },
+      { position_lat: 35.1, position_long: 139.1, altitude: 20 },
+      { position_lat: 35.2, position_long: 139.2 }
+    ]
+  });
+  assert.equal(out.records[0].elevationMeters, 11);
+  assert.equal(out.records[1].elevationMeters, 20);
+  assert.equal(out.records[2].elevationMeters, null);
 });
 
 test('FIT Parser: name / type が文字列でない場合は default 値で正規化する', () => {

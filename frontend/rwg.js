@@ -39,12 +39,14 @@
    * - name: the route's own display name (used as a substitute filename).
    */
   function normalizeRwgData(data) {
+    // RWG's track_points encode elevation as `e` (meters above sea level).
     const records = (Array.isArray(data?.track_points) ? data.track_points : [])
       .filter((p) => isValidLatLon(p?.y, p?.x))
       .map((p) => ({
         lat: p.y,
         lon: p.x,
-        distanceMeters: Number.isFinite(p.d) ? p.d : null
+        distanceMeters: Number.isFinite(p.d) ? p.d : null,
+        elevationMeters: Number.isFinite(p.e) ? p.e : null
       }));
 
     const cuePoints = (Array.isArray(data?.course_points) ? data.course_points : [])
