@@ -45,6 +45,61 @@ test('Route Math: 2点未満の GPX は例外を投げる', () => {
   assert.throws(() => parseGpxText('<gpx><trkpt lat="35" lon="139"></trkpt></gpx>'), /2点以上/);
 });
 
+test('GPX Elevation: trkpt 内の ele を読み取り properties.elevations を返す', () => {
+  const xml = [
+    '<gpx><trk><trkseg>',
+    '<trkpt lat="35.0" lon="139.0"><ele>10.5</ele></trkpt>',
+    '<trkpt lat="35.1" lon="139.1"><ele>20</ele></trkpt>',
+    '<trkpt lat="35.2" lon="139.2"><ele>15.25</ele></trkpt>',
+    '</trkseg></trk></gpx>'
+  ].join('');
+  const parsed = parseGpxText(xml);
+  assert.deepEqual(parsed.geometry.coordinates, [
+    [139.0, 35.0],
+    [139.1, 35.1],
+    [139.2, 35.2]
+  ]);
+  assert.deepEqual(parsed.properties.elevations, [10.5, 20, 15.25]);
+});
+
+test('GPX Elevation: 一部の trkpt に ele が無い場合は null を残す', () => {
+  const xml = [
+    '<gpx><trk><trkseg>',
+    '<trkpt lat="35.0" lon="139.0"><ele>10</ele></trkpt>',
+    '<trkpt lat="35.1" lon="139.1"></trkpt>',
+    '<trkpt lat="35.2" lon="139.2"><ele>30</ele></trkpt>',
+    '</trkseg></trk></gpx>'
+  ].join('');
+  const parsed = parseGpxText(xml);
+  assert.deepEqual(parsed.properties.elevations, [10, null, 30]);
+});
+
+test('GPX Elevation: ele が全く無い GPX では elevations は null', () => {
+  const xml = [
+    '<gpx><trk><trkseg>',
+    '<trkpt lat="35.0" lon="139.0"></trkpt>',
+    '<trkpt lat="35.1" lon="139.1"></trkpt>',
+    '</trkseg></trk></gpx>'
+  ].join('');
+  const parsed = parseGpxText(xml);
+  assert.equal(parsed.properties.elevations, null);
+});
+
+test('GPX Elevation: 自己終端タグや属性順違いでも順序通り抽出できる', () => {
+  const xml = [
+    '<gpx><rte>',
+    "<rtept lon='139.0' lat='35.0'><ele>5</ele></rtept>",
+    '<rtept lat="35.1" lon="139.1" />',
+    '</rte></gpx>'
+  ].join('');
+  const parsed = parseGpxText(xml);
+  assert.deepEqual(parsed.geometry.coordinates, [
+    [139.0, 35.0],
+    [139.1, 35.1]
+  ]);
+  assert.deepEqual(parsed.properties.elevations, [5, null]);
+});
+
 test('Route Math: bbox を算出できる', () => {
   assert.deepEqual(
     computeBbox([

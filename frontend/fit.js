@@ -60,12 +60,23 @@
    * Records / course points outside the valid lat/lon range are dropped.
    */
   function normalizeFitData(data) {
+    // fit-file-parser emits the FIT 'altitude' field as meters when lengthUnit:'m'
+    // is set on the parser. 'enhanced_altitude' is the GPS+barometric fused value
+    // when present; prefer it over the plain altitude for chart accuracy.
+    const pickElevation = (r) => {
+      const enhanced = Number(r?.enhanced_altitude);
+      if (Number.isFinite(enhanced)) return enhanced;
+      const altitude = Number(r?.altitude);
+      return Number.isFinite(altitude) ? altitude : null;
+    };
+
     const records = (Array.isArray(data?.records) ? data.records : [])
       .filter((r) => isValidLatLon(r?.position_lat, r?.position_long))
       .map((r) => ({
         lat: r.position_lat,
         lon: r.position_long,
-        distanceMeters: Number.isFinite(r.distance) ? r.distance : null
+        distanceMeters: Number.isFinite(r.distance) ? r.distance : null,
+        elevationMeters: pickElevation(r)
       }));
 
     const coursePoints = (Array.isArray(data?.course_points) ? data.course_points : [])
