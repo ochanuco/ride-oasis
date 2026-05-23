@@ -44,6 +44,7 @@
   "homepage": "https://github.com/ochanuco/ride-oasis#readme",
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "osm-pbf-parser-node": "^1.1.4",
     "playwright": "^1.58.2",
     "wrangler": "^4.41.0"
   },
