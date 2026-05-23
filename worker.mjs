@@ -68,13 +68,23 @@ const ROUTE_CACHE_TTL_S = 5 * 60;
  */
 async function withEdgeCache(request, ttlSeconds, build) {
   const cache = caches.default;
-  const hit = await cache.match(request);
-  if (hit) return hit;
+  // caches.default は最適化層。match/put の例外で API 応答そのものを失敗
+  // させない (R2/D1 が健全なら必ず build() を返す)。
+  try {
+    const hit = await cache.match(request);
+    if (hit) return hit;
+  } catch (err) {
+    console.warn('edge cache match failed', err);
+  }
   const fresh = await build();
   if (fresh.ok && request.method === 'GET') {
-    const cacheable = new Response(fresh.clone().body, fresh);
-    cacheable.headers.set('cache-control', `public, max-age=${ttlSeconds}`);
-    await cache.put(request, cacheable);
+    try {
+      const cacheable = new Response(fresh.clone().body, fresh);
+      cacheable.headers.set('cache-control', `public, max-age=${ttlSeconds}`);
+      await cache.put(request, cacheable);
+    } catch (err) {
+      console.warn('edge cache put failed', err);
+    }
   }
   return fresh;
 }

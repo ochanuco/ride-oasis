@@ -244,7 +244,7 @@ test('Map Data: SELECT に不要列が含まれない', () => {
   assert.equal(/SELECT[^F]*geocode_level[^_]/.test(sql), false);
 });
 
-test('Map Data: ORDER BY 削除済 (sort のオーバヘッド回避)', () => {
+test('Map Data: ORDER BY は単一 PRIMARY KEY のみ (LIMIT/OFFSET ページング安定)', () => {
   const { sql } = buildSupplyPointsQuery({
     bbox: { minLng: 139, minLat: 35, maxLng: 140, maxLat: 36 },
     chains: null,
@@ -252,5 +252,7 @@ test('Map Data: ORDER BY 削除済 (sort のオーバヘッド回避)', () => {
     limit: 100,
     offset: 0
   });
-  assert.equal(/ORDER BY/i.test(sql), false);
+  assert.match(sql, /ORDER BY supply_point_id\b/);
+  // 旧 3 列ソートは復活していない
+  assert.equal(/ORDER BY chain/.test(sql), false);
 });
