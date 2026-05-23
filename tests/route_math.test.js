@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   computeBbox,
   expandBbox,
+  quantizeBbox,
   pointToPointDistanceMeters,
   pointToRouteDistanceMeters,
   bearingDegrees,
@@ -260,4 +261,35 @@ test('Route Math: routeProjection は不正な点で null を返す', () => {
   const coords = [[139.0, 35.0], [139.001, 35.0]];
   assert.equal(routeProjection([Number.NaN, 35.0], coords), null);
   assert.equal(routeProjection(null, coords), null);
+});
+
+test('Route Math: quantizeBbox は grid セル境界に揃える', () => {
+  // 0.01° grid 上で min/max が同じセル内に収まる入力
+  const q = quantizeBbox([135.5023, 34.6937, 135.5051, 34.6950], 0.01);
+  assert.deepEqual(q, [135.50, 34.69, 135.51, 34.70]);
+});
+
+test('Route Math: quantizeBbox は粒度を跨ぐ bbox をそれぞれ floor/ceil', () => {
+  const q = quantizeBbox([135.502, 34.693, 135.522, 34.713], 0.01);
+  assert.deepEqual(q, [135.50, 34.69, 135.53, 34.72]);
+});
+
+test('Route Math: quantizeBbox はデフォルト grid 0.01°', () => {
+  const q = quantizeBbox([135.5023, 34.6937, 135.5051, 34.6950]);
+  // 浮動小数誤差を許容
+  assert.ok(Math.abs(q[0] - 135.50) < 1e-9);
+  assert.ok(Math.abs(q[1] - 34.69) < 1e-9);
+  assert.ok(Math.abs(q[2] - 135.51) < 1e-9);
+  assert.ok(Math.abs(q[3] - 34.70) < 1e-9);
+});
+
+test('Route Math: quantizeBbox(null) は null', () => {
+  assert.equal(quantizeBbox(null, 0.01), null);
+});
+
+test('Route Math: 隣接の似たエリアは quantize 後に同じ bbox になる (cache hit 期待)', () => {
+  // 同じ ~1km セル内の 2 つの異なる詳細 bbox は同じ量子化結果を返す
+  const a = quantizeBbox([135.502, 34.693, 135.504, 34.695], 0.01);
+  const b = quantizeBbox([135.503, 34.694, 135.505, 34.696], 0.01);
+  assert.deepEqual(a, b);
 });

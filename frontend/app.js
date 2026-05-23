@@ -1622,10 +1622,17 @@ function createRouteFeatureFromCoords(coordinates, elevations = null) {
   };
 }
 
+// /api/supply-points の Worker edge cache (caches.default) はキー = URL なので
+// 微妙に異なる bbox URL ばかりだと cache hit しない。0.01° (~1km) の格子に
+// 量子化することで、同エリアの 2 回目以降は同じ URL になり edge cache 命中。
+// over-fetch 分は post-filter の filterMatchedPoints が距離で削るので影響なし。
+const SUPPLY_POINTS_BBOX_GRID_DEG = 0.01;
+
 /** Expands the route bbox so the API can return nearby candidate points. */
 function expandedBboxForQuery(routeSnapshot, distanceMeters) {
   const routeBbox = window.RouteMath.computeBbox(routeSnapshot);
-  return window.RouteMath.expandBbox(routeBbox, Math.max(distanceMeters, 2000));
+  const padded = window.RouteMath.expandBbox(routeBbox, Math.max(distanceMeters, 2000));
+  return window.RouteMath.quantizeBbox(padded, SUPPLY_POINTS_BBOX_GRID_DEG);
 }
 
 /** Loads candidate supply points from the local API for the current filters. */

@@ -1,0 +1,11 @@
+# mise: dev tool versions for ride-oasis
+#
+# - node 22: matches CI (.github/workflows/unit-tests.yml runs on 22 + 24).
+#   wrangler / @geolonia deps support both; we pin LTS for reproducibility.
+# - rust stable: used by the experimental rust-wasm/ cycling router PoC.
+# - wasm-pack: builds the rust crate to wasm32 for browser/Worker bundling.
+
+[tools]
+node = "22"
+rust = "stable"
+"cargo:wasm-pack" = "latest"
