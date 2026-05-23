@@ -34,8 +34,40 @@ database_name = "rideoasis-supply-points"
 database_id = "d93cd527-2a12-4096-a519-cc0820008c88"
 migrations_dir = "cloudflare/migrations"
 
+# Cycling graph tiles for /api/route. The graph is split into ~5km cells
+# (lib/cycling/tile_partition.js, TILE_DEG=0.05) and stored as one NDJSON
+# per tile under the tiles/ prefix. Worker fetches just the tiles it needs.
+#
+# Full pipeline (run locally on a machine with ~8GB RAM):
+#   1. Download regional PBF, e.g. Kansai:
+#        curl -O https://download.geofabrik.de/asia/japan/kansai-latest.osm.pbf
+#   2. Extract cycling graph:
+#        node scripts/cycling_build_graph.js \
+#          --pbf kansai-latest.osm.pbf --out data/cycling
+#   3. Split into tiles:
+#        node scripts/cycling_tile_split.js --dir data/cycling
+#   4. Upload tiles + index to R2:
+#        for f in data/cycling/tiles/*.ndjson; do
+#          k=$(basename "$f" .ndjson)
+#          wrangler r2 object put "ride-oasis-cycling-graph/tiles/$k.ndjson" --file="$f"
+#        done
+#        wrangler r2 object put ride-oasis-cycling-graph/tile_index.json \
+#          --file=data/cycling/tile_index.json
+#
+# Until tiles are uploaded /api/route returns 503 with a clear message and
+# the frontend falls back to a straight line.
+[[r2_buckets]]
+binding = "GRAPH"
+bucket_name = "ride-oasis-cycling-graph"
+
 [observability]
 enabled = true
+
+# Bidirectional Dijkstra on the cycling tile graph can consume more than the
+# default 50ms CPU on dense urban tiles (Osaka/Kyoto). Workers Paid allows
+# up to 30s when opted-in via [limits].
+[limits]
+cpu_ms = 30000
 
 # 非本番ブランチからのプレビューには `wrangler versions upload` を使う
 # (npm run cf:preview)。同じ ride-oasis Worker に新しい version が

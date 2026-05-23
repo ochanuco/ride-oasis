@@ -1866,6 +1866,41 @@ async function handleRwgFetch(event) {
   }
 }
 
+/**
+ * Calls /api/route. Returns { coordinates } on success, { error, ...meta } when
+ * the worker rejects the request with a known reason (e.g. too_far), or null on
+ * unknown failures so the caller falls back to a straight line silently.
+ */
+async function fetchCyclingRoute(from, to, loadToken) {
+  const qs = new URLSearchParams({
+    from: `${from[0]},${from[1]}`,
+    to: `${to[0]},${to[1]}`
+  });
+  try {
+    const res = await fetch(`${API_BASE}/route?${qs.toString()}`, {
+      headers: { accept: 'application/geo+json' }
+    });
+    if (loadToken !== latestRouteLoadToken) return null;
+    if (res.status === 422 || res.status === 404) {
+      try {
+        const body = await res.json();
+        return body && body.error ? body : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    if (!res.ok) return null;
+    const json = await res.json();
+    const coords = json && json.geometry && Array.isArray(json.geometry.coordinates)
+      ? json.geometry.coordinates
+      : null;
+    if (!coords || coords.length < 2) return null;
+    return { coordinates: coords };
+  } catch (_err) {
+    return null;
+  }
+}
+
 /** Records a manual map click as start (1st click) or goal (2nd click) and refreshes the map. */
 async function handleManualMapClick(mapCoord) {
   if (manualPoints.length >= 2) return;
@@ -1889,15 +1924,43 @@ async function handleManualMapClick(mapCoord) {
     return;
   }
 
-  routeFeature = routeSource.getFeatures()[0] || null;
-  routeCoordinates = manualPoints.map((coord) => [coord[0], coord[1]]);
+  setStatus('ルート計算中…');
+  const routed = await fetchCyclingRoute(manualPoints[0], manualPoints[1], loadToken);
+  if (loadToken !== latestRouteLoadToken) return;
+
+  const coordsFromApi = routed && Array.isArray(routed.coordinates) ? routed.coordinates : null;
+  const coords = coordsFromApi || manualPoints.map((coord) => [coord[0], coord[1]]);
+  if (coordsFromApi) {
+    const parsedRoute = createRouteFeatureFromCoords(coords);
+    routeFeature = parsedRoute.feature;
+    clearRouteVisualSources();
+    renderRoute(parsedRoute.feature);
+  } else {
+    routeFeature = routeSource.getFeatures()[0] || null;
+  }
+
+  routeCoordinates = coords;
   routeElevations = [];
   rebuildRouteElevationCache();
   resetResults();
   updateRoutePointCount();
   fitToVisibleData();
   renderElevationChart();
-  setStatus('手動経路を生成しました');
+  let statusMsg;
+  if (coordsFromApi) {
+    statusMsg = '自転車ルートを生成しました';
+  } else if (routed && routed.error === 'too_far') {
+    const km = Math.round(routed.straight_line_m / 100) / 10;
+    const maxKm = Math.round(routed.max_straight_line_m / 1000);
+    statusMsg = `2点間が遠すぎます (${km}km > ${maxKm}km)。直線で代用します`;
+  } else if (routed && routed.error === 'unreachable_in_corridor') {
+    statusMsg = 'ルート探索範囲外のため直線で代用します';
+  } else if (routed && (routed.error === 'no_nearby_node_from' || routed.error === 'no_nearby_node_to')) {
+    statusMsg = '近くに道路が見つかりませんでした。直線で代用します';
+  } else {
+    statusMsg = 'ルート計算 API 未配備のため直線で生成しました';
+  }
+  setStatus(statusMsg);
   syncUrlState();
   if (loadToken !== latestRouteLoadToken) return;
   await refreshMap([...routeCoordinates]);
