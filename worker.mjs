@@ -3,6 +3,7 @@
 // destructure the helpers we need. Going through the default import is the
 // most portable way to consume CJS from ESM under Workers' bundler.
 import mapData from './lib/map_data.js';
+import cyclingRouterModule from './lib/cycling/router.js';
 
 const {
   parseSupplyPointFilters,
@@ -11,7 +12,14 @@ const {
   ValidationError
 } = mapData;
 
+const { CyclingRouter } = cyclingRouterModule;
+
 const API_PATH = '/api/supply-points';
+const ROUTE_PATH = '/api/route';
+
+// Per-isolate router cache. Loading the graph from R2 is expensive so we
+// reuse the same instance across requests in the same isolate.
+let routerCache = null;
 const NAMED_PLACEHOLDER_RE = /:([A-Za-z_][A-Za-z0-9_]*)/g;
 
 /**
@@ -30,6 +38,91 @@ function prepareForD1(db, sql, params) {
     return '?';
   });
   return db.prepare(positionalSql).bind(...ordered);
+}
+
+async function loadRouter(env) {
+  if (routerCache) return routerCache;
+  if (!env.GRAPH) {
+    const err = new Error('GRAPH R2 binding is not configured');
+    err.code = 'no_graph_binding';
+    throw err;
+  }
+  const [nodesObj, edgesObj] = await Promise.all([
+    env.GRAPH.get('nodes.ndjson'),
+    env.GRAPH.get('edges.ndjson')
+  ]);
+  if (!nodesObj || !edgesObj) {
+    const err = new Error('graph artifacts missing in R2 (nodes.ndjson / edges.ndjson)');
+    err.code = 'graph_missing';
+    throw err;
+  }
+  const router = new CyclingRouter();
+  router.loadFromNDJSON(await nodesObj.text(), await edgesObj.text());
+  routerCache = router;
+  return router;
+}
+
+function parseLonLat(value) {
+  if (!value) return null;
+  const parts = value.split(',');
+  if (parts.length !== 2) return null;
+  const lon = Number(parts[0]);
+  const lat = Number(parts[1]);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  return [lon, lat];
+}
+
+async function handleRoute(url, env) {
+  const from = parseLonLat(url.searchParams.get('from'));
+  const to = parseLonLat(url.searchParams.get('to'));
+  if (!from || !to) {
+    return Response.json(
+      { error: 'from and to must be in "lon,lat" form' },
+      { status: 400 }
+    );
+  }
+
+  let router;
+  try {
+    router = await loadRouter(env);
+  } catch (err) {
+    if (err && err.code === 'no_graph_binding') {
+      return Response.json({ error: err.message }, { status: 503 });
+    }
+    if (err && err.code === 'graph_missing') {
+      return Response.json({ error: err.message }, { status: 503 });
+    }
+    throw err;
+  }
+
+  const r = router.route(from[0], from[1], to[0], to[1]);
+  if (r.error) {
+    const status =
+      r.error === 'unreachable' ? 404 :
+      r.error === 'no_nearby_node_from' || r.error === 'no_nearby_node_to' ? 422 :
+      500;
+    return Response.json(r, { status });
+  }
+
+  return Response.json(
+    {
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: r.coordinates },
+      properties: {
+        distance_cost: r.distance_cost,
+        node_count: r.node_count,
+        settled: r.settled,
+        snap_from_m: r.snap_from_m,
+        snap_to_m: r.snap_to_m
+      }
+    },
+    {
+      headers: {
+        'content-type': 'application/geo+json; charset=utf-8',
+        'cache-control': 'public, max-age=300'
+      }
+    }
+  );
 }
 
 /** Returns the GeoJSON FeatureCollection for the requested supply-points filter. */
@@ -71,13 +164,14 @@ export default {
    */
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === API_PATH) {
+    if (url.pathname === API_PATH || url.pathname === ROUTE_PATH) {
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('method not allowed', { status: 405 });
       }
+      const handler = url.pathname === ROUTE_PATH ? handleRoute : handleSupplyPoints;
       let response;
       try {
-        response = await handleSupplyPoints(url, env);
+        response = await handler(url, env);
       } catch (error) {
         response = errorResponse(error);
       }

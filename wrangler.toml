@@ -34,6 +34,19 @@ database_name = "rideoasis-supply-points"
 database_id = "d93cd527-2a12-4096-a519-cc0820008c88"
 migrations_dir = "cloudflare/migrations"
 
+# Cycling graph artifacts for /api/route. Upload nodes.ndjson + edges.ndjson
+# produced by scripts/cycling_build_graph.js into this bucket. Until the bucket
+# is created and populated, /api/route returns 503 with a clear message.
+#
+# Create with:
+#   wrangler r2 bucket create ride-oasis-cycling-graph
+# Upload with:
+#   wrangler r2 object put ride-oasis-cycling-graph/nodes.ndjson --file=data/cycling/nodes.ndjson
+#   wrangler r2 object put ride-oasis-cycling-graph/edges.ndjson --file=data/cycling/edges.ndjson
+[[r2_buckets]]
+binding = "GRAPH"
+bucket_name = "ride-oasis-cycling-graph"
+
 [observability]
 enabled = true
 
