@@ -91,6 +91,29 @@ test('複数タイルがマージされる (同じノード ID は重複登録�
   assert.equal(loader.view.nodes.size, 1);
 });
 
+test('nodeIdToIndex / indexToNodeId が tile load 時に同期更新される', async () => {
+  const loader = new TileLoader(
+    makeMemFetcher({
+      A: tileOf(
+        [
+          { id: 100, lon: 0, lat: 0 },
+          { id: 200, lon: 0.001, lat: 0 }
+        ],
+        [{ from: 100, to: 200, toLon: 0.001, toLat: 0, cost: 100 }]
+      )
+    })
+  );
+  await loader.load('A');
+  const i100 = loader.view.nodeIdToIndex.get(100);
+  const i200 = loader.view.nodeIdToIndex.get(200);
+  assert.equal(typeof i100, 'number');
+  assert.equal(typeof i200, 'number');
+  assert.notEqual(i100, i200);
+  assert.equal(loader.view.indexToNodeId[i100], 100);
+  assert.equal(loader.view.indexToNodeId[i200], 200);
+  assert.equal(loader.view.indexToNodeId.length, 2);
+});
+
 test('grid からスナップ検索が可能', async () => {
   const loader = new TileLoader(
     makeMemFetcher({ A: tileOf([{ id: 42, lon: 135.5, lat: 34.7 }], []) })
