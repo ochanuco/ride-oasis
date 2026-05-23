@@ -63,6 +63,12 @@ bucket_name = "ride-oasis-cycling-graph"
 [observability]
 enabled = true
 
+# Bidirectional Dijkstra on the cycling tile graph can consume more than the
+# default 50ms CPU on dense urban tiles (Osaka/Kyoto). Workers Paid allows
+# up to 30s when opted-in via [limits].
+[limits]
+cpu_ms = 30000
+
 # 非本番ブランチからのプレビューには `wrangler versions upload` を使う
 # (npm run cf:preview)。同じ ride-oasis Worker に新しい version が
 # 追加され、本番トラフィックは影響を受けないまま、その version 専用の
