@@ -77,6 +77,18 @@ test('oneway=yes は edge.oneway=true で伝搬', () => {
   const coords = nodeMap([[10, [139, 35]], [11, [139.01, 35.01]]]);
   const r = edgesForWay(way, coords);
   assert.equal(r.edges[0].oneway, true);
+  assert.equal(r.edges[0].from, 10);
+  assert.equal(r.edges[0].to, 11);
+});
+
+test('oneway=-1: エッジが refs 逆順 (11 → 10) で出る', () => {
+  const way = { id: 1, refs: [10, 11], tags: { highway: 'primary', oneway: '-1' } };
+  const coords = nodeMap([[10, [139, 35]], [11, [139.01, 35.01]]]);
+  const r = edgesForWay(way, coords);
+  assert.equal(r.edges.length, 1);
+  assert.equal(r.edges[0].from, 11);
+  assert.equal(r.edges[0].to, 10);
+  assert.equal(r.edges[0].oneway, true);
 });
 
 test('cycleway の cost_m は length_m より明確に小さい', () => {

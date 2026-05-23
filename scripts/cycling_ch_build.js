@@ -2,8 +2,20 @@
 
 const fs = require('fs');
 const path = require('path');
+const { once } = require('events');
 
 const { buildContractionHierarchy } = require('../lib/cycling/ch_builder');
+
+const BACKPRESSURE_CHECK_INTERVAL = 2048;
+const STREAM_HIGH_WATER_MARK = 4 * 1024 * 1024;
+
+function createBufferedStream(filePath) {
+  return fs.createWriteStream(filePath, { highWaterMark: STREAM_HIGH_WATER_MARK });
+}
+
+async function drainIfNeeded(stream) {
+  if (stream.writableNeedDrain) await once(stream, 'drain');
+}
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = { dir: null, hopLimit: 5 };
@@ -75,17 +87,23 @@ async function main() {
   const levelsPath = path.join(args.dir, 'ch_levels.ndjson');
   const chEdgesPath = path.join(args.dir, 'ch_edges.ndjson');
 
-  const levelsOut = fs.createWriteStream(levelsPath);
+  const levelsOut = createBufferedStream(levelsPath);
+  let lw = 0;
   for (const [id, lvl] of ch.level) {
     levelsOut.write(`${JSON.stringify({ id, level: lvl })}\n`);
+    lw += 1;
+    if (lw % BACKPRESSURE_CHECK_INTERVAL === 0) await drainIfNeeded(levelsOut);
   }
   await new Promise((resolve, reject) =>
     levelsOut.end((e) => (e ? reject(e) : resolve()))
   );
 
-  const edgesOut = fs.createWriteStream(chEdgesPath);
+  const edgesOut = createBufferedStream(chEdgesPath);
+  let ew = 0;
   for (const e of ch.adj.allEdges) {
     edgesOut.write(`${JSON.stringify(e)}\n`);
+    ew += 1;
+    if (ew % BACKPRESSURE_CHECK_INTERVAL === 0) await drainIfNeeded(edgesOut);
   }
   await new Promise((resolve, reject) =>
     edgesOut.end((e) => (e ? reject(e) : resolve()))

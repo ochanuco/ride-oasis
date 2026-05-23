@@ -1877,7 +1877,7 @@ async function fetchCyclingRoute(from, to, loadToken) {
     to: `${to[0]},${to[1]}`
   });
   try {
-    const res = await fetch(`/api/route?${qs.toString()}`, {
+    const res = await fetch(`${API_BASE}/route?${qs.toString()}`, {
       headers: { accept: 'application/geo+json' }
     });
     if (loadToken !== latestRouteLoadToken) return null;

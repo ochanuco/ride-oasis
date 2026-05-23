@@ -112,6 +112,43 @@ test('bridleway は bicycle=yes で通行可、無指定は不可', () => {
   assert.equal(classifyWay({ highway: 'bridleway', bicycle: 'yes' }).allowed, true);
 });
 
+test('bridleway + bicycle=designated は kind=bridleway (track_designated に誤分類しない)', () => {
+  const r = classifyWay({ highway: 'bridleway', bicycle: 'designated' });
+  assert.equal(r.allowed, true);
+  assert.equal(r.kind, 'bridleway');
+});
+
+test('oneway=-1: classifyWay の reversed=true', () => {
+  const r = classifyWay({ highway: 'primary', oneway: '-1' });
+  assert.equal(r.allowed, true);
+  assert.equal(r.oneway, true);
+  assert.equal(r.reversed, true);
+});
+
+test('oneway=reverse も -1 と同じ扱い', () => {
+  const r = classifyWay({ highway: 'primary', oneway: 'reverse' });
+  assert.equal(r.oneway, true);
+  assert.equal(r.reversed, true);
+});
+
+test('oneway:bicycle=-1: 自転車だけ refs 逆順扱い', () => {
+  const r = classifyWay({ highway: 'primary', 'oneway:bicycle': '-1' });
+  assert.equal(r.oneway, true);
+  assert.equal(r.reversed, true);
+});
+
+test('oneway=yes は reversed=false', () => {
+  const r = classifyWay({ highway: 'primary', oneway: 'yes' });
+  assert.equal(r.oneway, true);
+  assert.equal(r.reversed, false);
+});
+
+test('directionOf: 入力なしは両方向', () => {
+  const { directionOf } = require('../lib/cycling/tag_classifier');
+  assert.deepEqual(directionOf({}), { oneway: false, reversed: false });
+  assert.deepEqual(directionOf(null), { oneway: false, reversed: false });
+});
+
 test('construction/proposed は除外', () => {
   assert.equal(classifyWay({ highway: 'construction' }).allowed, false);
   assert.equal(classifyWay({ highway: 'proposed' }).allowed, false);

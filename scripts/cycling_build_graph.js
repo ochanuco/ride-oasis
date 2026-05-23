@@ -2,9 +2,26 @@
 
 const fs = require('fs');
 const path = require('path');
+const { once } = require('events');
 
 const { classifyWay } = require('../lib/cycling/tag_classifier');
 const { edgesForWay } = require('../lib/cycling/graph_builder');
+
+// Heuristic: only check backpressure every N writes to amortize the syscall
+// cost. Combined with a generous highWaterMark this keeps memory bounded for
+// the 8GB+ workstation use case without per-line awaits.
+const BACKPRESSURE_CHECK_INTERVAL = 2048;
+const STREAM_HIGH_WATER_MARK = 4 * 1024 * 1024;
+
+function createBufferedStream(filePath) {
+  return fs.createWriteStream(filePath, { highWaterMark: STREAM_HIGH_WATER_MARK });
+}
+
+async function drainIfNeeded(stream) {
+  if (stream.writableNeedDrain) {
+    await once(stream, 'drain');
+  }
+}
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = { pbf: null, out: null, limit: null };
@@ -45,7 +62,7 @@ async function streamPbf(pbfPath, onItem, limit) {
   let n = 0;
   for await (const item of createOSMStream(pbfPath)) {
     if (limit && n >= limit) break;
-    onItem(item);
+    await onItem(item);
     n += 1;
   }
   return n;
@@ -54,17 +71,18 @@ async function streamPbf(pbfPath, onItem, limit) {
 async function passWays(pbfPath, outDir, limit) {
   const waysPath = path.join(outDir, 'ways.ndjson');
   const idsPath = path.join(outDir, 'node_ids.bin');
-  const waysOut = fs.createWriteStream(waysPath);
+  const waysOut = createBufferedStream(waysPath);
 
   const neededIds = new Set();
   let waysSeen = 0;
   let waysEligible = 0;
   let waysExcluded = 0;
+  let writes = 0;
   let last = 0;
 
   await streamPbf(
     pbfPath,
-    (item) => {
+    async (item) => {
       if (item && item.type === 'way') {
         waysSeen += 1;
         const cls = classifyWay(item.tags);
@@ -79,6 +97,8 @@ async function passWays(pbfPath, outDir, limit) {
         waysOut.write(
           `${JSON.stringify({ id: item.id, refs, tags: item.tags })}\n`
         );
+        writes += 1;
+        if (writes % BACKPRESSURE_CHECK_INTERVAL === 0) await drainIfNeeded(waysOut);
         last = logProgress('ways seen', waysSeen, last);
       }
     },
@@ -118,15 +138,16 @@ async function passNodes(pbfPath, outDir, limit) {
   const idsPath = path.join(outDir, 'node_ids.bin');
   const nodesPath = path.join(outDir, 'nodes.ndjson');
   const sortedIds = loadSortedIds(idsPath);
-  const nodesOut = fs.createWriteStream(nodesPath);
+  const nodesOut = createBufferedStream(nodesPath);
 
   let nodesSeen = 0;
   let nodesKept = 0;
+  let writes = 0;
   let last = 0;
 
   await streamPbf(
     pbfPath,
-    (item) => {
+    async (item) => {
       if (item && item.type === 'node') {
         nodesSeen += 1;
         if (!binarySearch(sortedIds, item.id)) return;
@@ -134,6 +155,8 @@ async function passNodes(pbfPath, outDir, limit) {
         nodesOut.write(
           `${JSON.stringify({ id: item.id, lon: item.lon, lat: item.lat })}\n`
         );
+        writes += 1;
+        if (writes % BACKPRESSURE_CHECK_INTERVAL === 0) await drainIfNeeded(nodesOut);
         last = logProgress('nodes seen', nodesSeen, last);
       }
     },
@@ -158,13 +181,13 @@ function loadNodesMap(filePath) {
   return map;
 }
 
-function passJoin(outDir) {
+async function passJoin(outDir) {
   const waysPath = path.join(outDir, 'ways.ndjson');
   const nodesPath = path.join(outDir, 'nodes.ndjson');
   const edgesPath = path.join(outDir, 'edges.ndjson');
 
   const nodes = loadNodesMap(nodesPath);
-  const edgesOut = fs.createWriteStream(edgesPath);
+  const edgesOut = createBufferedStream(edgesPath);
 
   let edges = 0;
   let waysProcessed = 0;
@@ -182,16 +205,14 @@ function passJoin(outDir) {
     for (const e of r.edges) {
       edgesOut.write(`${JSON.stringify(e)}\n`);
       edges += 1;
+      if (edges % BACKPRESSURE_CHECK_INTERVAL === 0) await drainIfNeeded(edgesOut);
     }
   }
 
-  return new Promise((resolve, reject) => {
-    edgesOut.end((err) =>
-      err
-        ? reject(err)
-        : resolve({ waysProcessed, edges, skippedMissingNode, skippedZeroLength })
-    );
+  await new Promise((resolve, reject) => {
+    edgesOut.end((err) => (err ? reject(err) : resolve()));
   });
+  return { waysProcessed, edges, skippedMissingNode, skippedZeroLength };
 }
 
 async function main() {

@@ -60,6 +60,8 @@ function parseLonLat(value) {
   const lon = Number(parts[0]);
   const lat = Number(parts[1]);
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  if (lon < -180 || lon > 180) return null;
+  if (lat < -90 || lat > 90) return null;
   return [lon, lat];
 }
 
@@ -88,6 +90,7 @@ async function handleRoute(url, env) {
     const status =
       r.error === 'unreachable_in_corridor' ? 404 :
       r.error === 'too_far' ? 422 :
+      r.error === 'corridor_too_large' ? 422 :
       r.error === 'no_nearby_node_from' || r.error === 'no_nearby_node_to' ? 422 :
       500;
     return Response.json(r, { status });
