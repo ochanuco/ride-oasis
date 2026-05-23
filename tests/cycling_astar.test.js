@@ -92,11 +92,18 @@ test('A* は線形 chain + 北方向 detour で detour ノードを settle し�
   }
   const view = { nodes, fwd, rev };
   const a = aStarOnView(view, 0, 10);
-  // chain は 11 ノード。detour は北方向 (=goal と直交) で h() があまり増えない
-  // ため一部 pop されるが、heuristic が無いと 31 ノード全部 settle する。
-  // chain 11 + 少数 detour (経験上 ~3) で settle が 31 << に押さえられることを担保。
+  const d = bidiDijkstraOnView(view, 0, 10);
+  // 最適距離は両方一致
   assert.equal(a.distance, 10000);
+  assert.equal(d.distance, 10000);
+  // chain は 11 ノード + detour 20 = 全 31 ノード。heuristic 無い実装だと
+  // detour も大量に settle されうるところ、A* は heuristic で抑制される。
   assert.ok(a.settled <= 20, `expected A* settled << 31 (detour 抑制), got ${a.settled}`);
+  // detour 抑制効果が bidi Dijkstra より明確であることを直接比較
+  assert.ok(
+    a.settled <= d.settled,
+    `A* settled (${a.settled}) should be <= bidi (${d.settled})`
+  );
 });
 
 test('A*: 到達不能なら distance Infinity', () => {
