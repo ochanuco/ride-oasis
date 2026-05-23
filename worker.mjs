@@ -49,8 +49,44 @@ function ensureTileLoader(env) {
     err.code = 'no_graph_binding';
     throw err;
   }
-  tileLoaderCache = new TileLoader(makeR2Fetcher(env.GRAPH, 'tiles/'));
+  // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
+  // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
+  tileLoaderCache = new TileLoader(
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default)
+  );
   return tileLoaderCache;
+}
+
+const TILE_CACHE_TTL_S = 7 * 24 * 60 * 60; // 7d (旧タイル投入があれば手動でパージ)
+const SUPPLY_POINTS_CACHE_TTL_S = 5 * 60;
+const ROUTE_CACHE_TTL_S = 5 * 60;
+
+/**
+ * Caches an HTTP-cacheable response in `caches.default` and returns the
+ * (cloned) response to serve. `caches.default.put` requires the body to be
+ * consumable separately, hence the clone before put + before returning.
+ */
+async function withEdgeCache(request, ttlSeconds, build) {
+  const cache = caches.default;
+  // caches.default は最適化層。match/put の例外で API 応答そのものを失敗
+  // させない (R2/D1 が健全なら必ず build() を返す)。
+  try {
+    const hit = await cache.match(request);
+    if (hit) return hit;
+  } catch (err) {
+    console.warn('edge cache match failed', err);
+  }
+  const fresh = await build();
+  if (fresh.ok && request.method === 'GET') {
+    try {
+      const cacheable = new Response(fresh.clone().body, fresh);
+      cacheable.headers.set('cache-control', `public, max-age=${ttlSeconds}`);
+      await cache.put(request, cacheable);
+    } catch (err) {
+      console.warn('edge cache put failed', err);
+    }
+  }
+  return fresh;
 }
 
 function parseLonLat(value) {
@@ -160,10 +196,17 @@ export default {
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('method not allowed', { status: 405 });
       }
-      const handler = url.pathname === ROUTE_PATH ? handleRoute : handleSupplyPoints;
       let response;
       try {
-        response = await handler(url, env);
+        if (url.pathname === ROUTE_PATH) {
+          response = await withEdgeCache(request, ROUTE_CACHE_TTL_S, () =>
+            handleRoute(url, env)
+          );
+        } else {
+          response = await withEdgeCache(request, SUPPLY_POINTS_CACHE_TTL_S, () =>
+            handleSupplyPoints(url, env)
+          );
+        }
       } catch (error) {
         response = errorResponse(error);
       }
