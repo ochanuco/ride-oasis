@@ -3,9 +3,9 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
-const { finished } = require('stream/promises');
 
 const { tileKey } = require('../lib/cycling/tile_partition');
+const { encodeTile } = require('../lib/cycling/tile_binary');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = { dir: null };
@@ -23,12 +23,12 @@ function usage() {
     'Usage: node scripts/cycling_tile_split.js --dir <graphDir>',
     '',
     'Reads <graphDir>/nodes.ndjson + edges.ndjson and writes:',
-    '  <graphDir>/tiles/{x}_{y}.ndjson  - per-tile content (one item per line)',
-    '  <graphDir>/tile_index.json       - { tiles: ["x_y", ...], cellDeg, bbox }',
+    '  <graphDir>/tiles/{x}_{y}.bin  - binary v1 tile (see lib/cycling/tile_binary.js)',
+    '  <graphDir>/tile_index.json    - { tiles, cell_deg, bbox }',
     '',
-    'Tile NDJSON items:',
-    '  {"t":"n","id":N,"lon":F,"lat":F}                                   primary node',
-    '  {"t":"e","from":N,"to":N,"toLon":F,"toLat":F,"cost":F,"kind":?}    directed edge'
+    'Binary format trades JSON readability for ~5x smaller size and faster parse',
+    'on the Worker side. NDJSON intermediates (nodes/edges.ndjson) are still kept',
+    'because cycling_route.js (debug CLI) reads them directly.'
   ].join('\n');
 }
 
@@ -70,6 +70,8 @@ async function main() {
 
   const nodes = new Map();
   const nodeToTile = new Map();
+  const tileNodes = new Map();
+  const tileEdges = new Map();
   let bbox = null;
   let nodeCount = 0;
 
@@ -77,7 +79,14 @@ async function main() {
   await streamLines(nodesPath, (line) => {
     const n = JSON.parse(line);
     nodes.set(n.id, [n.lon, n.lat]);
-    nodeToTile.set(n.id, tileKey(n.lon, n.lat));
+    const key = tileKey(n.lon, n.lat);
+    nodeToTile.set(n.id, key);
+    let arr = tileNodes.get(key);
+    if (!arr) {
+      arr = [];
+      tileNodes.set(key, arr);
+    }
+    arr.push({ id: n.id, lon: n.lon, lat: n.lat });
     nodeCount += 1;
     if (!bbox) bbox = { west: n.lon, east: n.lon, south: n.lat, north: n.lat };
     else {
@@ -89,23 +98,14 @@ async function main() {
   });
   process.stderr.write(`  nodes=${nodeCount} in ${Date.now() - t0}ms\n`);
 
-  const tileStreams = new Map();
-  const tileStats = new Map();
-  const openTile = (key) => {
-    let s = tileStreams.get(key);
-    if (!s) {
-      s = fs.createWriteStream(path.join(tilesDir, `${key}.ndjson`));
-      tileStreams.set(key, s);
-      tileStats.set(key, { nodes: 0, edges: 0 });
+  const pushEdge = (key, edge) => {
+    let arr = tileEdges.get(key);
+    if (!arr) {
+      arr = [];
+      tileEdges.set(key, arr);
     }
-    return s;
+    arr.push(edge);
   };
-
-  for (const [id, [lon, lat]] of nodes) {
-    const key = nodeToTile.get(id);
-    openTile(key).write(`${JSON.stringify({ t: 'n', id, lon, lat })}\n`);
-    tileStats.get(key).nodes += 1;
-  }
 
   const t1 = Date.now();
   process.stderr.write(`[pass 2/2] tiling edges from ${edgesPath}\n`);
@@ -115,58 +115,53 @@ async function main() {
     const fromTile = nodeToTile.get(e.from);
     const toCoord = nodes.get(e.to);
     if (!fromTile || !toCoord) return;
-    openTile(fromTile).write(
-      `${JSON.stringify({
-        t: 'e',
-        from: e.from,
-        to: e.to,
-        toLon: toCoord[0],
-        toLat: toCoord[1],
-        cost: e.cost_m,
-        kind: e.kind || null
-      })}\n`
-    );
-    tileStats.get(fromTile).edges += 1;
+    pushEdge(fromTile, {
+      from: e.from,
+      to: e.to,
+      toLon: toCoord[0],
+      toLat: toCoord[1],
+      cost: e.cost_m
+    });
     edgeRecords += 1;
-
     if (!e.oneway) {
       const toTile = nodeToTile.get(e.to);
       const fromCoord = nodes.get(e.from);
       if (toTile && fromCoord) {
-        openTile(toTile).write(
-          `${JSON.stringify({
-            t: 'e',
-            from: e.to,
-            to: e.from,
-            toLon: fromCoord[0],
-            toLat: fromCoord[1],
-            cost: e.cost_m,
-            kind: e.kind || null
-          })}\n`
-        );
-        tileStats.get(toTile).edges += 1;
+        pushEdge(toTile, {
+          from: e.to,
+          to: e.from,
+          toLon: fromCoord[0],
+          toLat: fromCoord[1],
+          cost: e.cost_m
+        });
         edgeRecords += 1;
       }
     }
   });
   process.stderr.write(`  directed edge records=${edgeRecords} in ${Date.now() - t1}ms\n`);
 
-  await Promise.all(
-    [...tileStreams.values()].map(async (s) => {
-      s.end();
-      await finished(s);
-    })
-  );
+  const tileKeys = new Set([...tileNodes.keys(), ...tileEdges.keys()]);
+  let bytesWritten = 0;
+  for (const key of tileKeys) {
+    const ns = tileNodes.get(key) || [];
+    const es = tileEdges.get(key) || [];
+    const buf = encodeTile(ns, es);
+    const outPath = path.join(tilesDir, `${key}.bin`);
+    fs.writeFileSync(outPath, Buffer.from(buf));
+    bytesWritten += buf.byteLength;
+  }
 
-  const tileKeys = [...tileStats.keys()].sort();
+  const sortedKeys = [...tileKeys].sort();
   fs.writeFileSync(
     path.join(args.dir, 'tile_index.json'),
     JSON.stringify(
       {
         cell_deg: 0.05,
         bbox,
-        tile_count: tileKeys.length,
-        tiles: tileKeys
+        tile_count: sortedKeys.length,
+        tiles: sortedKeys,
+        format: 'binary-v1',
+        bytes: bytesWritten
       },
       null,
       2
@@ -175,7 +170,7 @@ async function main() {
 
   const totalMs = Date.now() - t0;
   process.stderr.write(
-    `done: ${tileKeys.length} tiles, ${(totalMs / 1000).toFixed(1)}s\n`
+    `done: ${sortedKeys.length} tiles, ${(bytesWritten / 1024 / 1024).toFixed(1)}MB, ${(totalMs / 1000).toFixed(1)}s\n`
   );
 }
 
