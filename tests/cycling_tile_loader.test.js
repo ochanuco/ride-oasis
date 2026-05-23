@@ -129,6 +129,7 @@ test('容量到達 ∧ 他者進行中のとき新規 load は skip', async () =
   // この瞬間: loaded={A,B} (cap), inflight={C} → D は skip
   const okD = await loader.load('D');
   assert.equal(okD, false);
+  assert.equal(calls, 3, 'D should not trigger a fetch');
   // クリーンアップ
   gates.get('C').release();
   await pC;
