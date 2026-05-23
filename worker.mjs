@@ -3,7 +3,8 @@
 // destructure the helpers we need. Going through the default import is the
 // most portable way to consume CJS from ESM under Workers' bundler.
 import mapData from './lib/map_data.js';
-import cyclingRouterModule from './lib/cycling/router.js';
+import tiledRouterModule from './lib/cycling/tiled_router.js';
+import tileLoaderModule from './lib/cycling/tile_loader.js';
 
 const {
   parseSupplyPointFilters,
@@ -12,14 +13,15 @@ const {
   ValidationError
 } = mapData;
 
-const { CyclingRouter } = cyclingRouterModule;
+const { TiledRouter } = tiledRouterModule;
+const { TileLoader, makeR2Fetcher } = tileLoaderModule;
 
 const API_PATH = '/api/supply-points';
 const ROUTE_PATH = '/api/route';
 
-// Per-isolate router cache. Loading the graph from R2 is expensive so we
-// reuse the same instance across requests in the same isolate.
-let routerCache = null;
+// Per-isolate tile loader cache. Tiles loaded from R2 are reused across
+// requests in the same isolate so repeat queries in the same city are cheap.
+let tileLoaderCache = null;
 const NAMED_PLACEHOLDER_RE = /:([A-Za-z_][A-Za-z0-9_]*)/g;
 
 /**
@@ -40,26 +42,15 @@ function prepareForD1(db, sql, params) {
   return db.prepare(positionalSql).bind(...ordered);
 }
 
-async function loadRouter(env) {
-  if (routerCache) return routerCache;
+function ensureTileLoader(env) {
+  if (tileLoaderCache) return tileLoaderCache;
   if (!env.GRAPH) {
     const err = new Error('GRAPH R2 binding is not configured');
     err.code = 'no_graph_binding';
     throw err;
   }
-  const [nodesObj, edgesObj] = await Promise.all([
-    env.GRAPH.get('nodes.ndjson'),
-    env.GRAPH.get('edges.ndjson')
-  ]);
-  if (!nodesObj || !edgesObj) {
-    const err = new Error('graph artifacts missing in R2 (nodes.ndjson / edges.ndjson)');
-    err.code = 'graph_missing';
-    throw err;
-  }
-  const router = new CyclingRouter();
-  router.loadFromNDJSON(await nodesObj.text(), await edgesObj.text());
-  routerCache = router;
-  return router;
+  tileLoaderCache = new TileLoader(makeR2Fetcher(env.GRAPH, 'tiles/'));
+  return tileLoaderCache;
 }
 
 function parseLonLat(value) {
@@ -82,23 +73,20 @@ async function handleRoute(url, env) {
     );
   }
 
-  let router;
+  let loader;
   try {
-    router = await loadRouter(env);
+    loader = ensureTileLoader(env);
   } catch (err) {
     if (err && err.code === 'no_graph_binding') {
       return Response.json({ error: err.message }, { status: 503 });
     }
-    if (err && err.code === 'graph_missing') {
-      return Response.json({ error: err.message }, { status: 503 });
-    }
     throw err;
   }
-
-  const r = router.route(from[0], from[1], to[0], to[1]);
+  const router = new TiledRouter(loader);
+  const r = await router.route(from[0], from[1], to[0], to[1]);
   if (r.error) {
     const status =
-      r.error === 'unreachable' ? 404 :
+      r.error === 'unreachable_in_corridor' ? 404 :
       r.error === 'no_nearby_node_from' || r.error === 'no_nearby_node_to' ? 422 :
       500;
     return Response.json(r, { status });

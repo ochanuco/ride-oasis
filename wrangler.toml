@@ -34,15 +34,28 @@ database_name = "rideoasis-supply-points"
 database_id = "d93cd527-2a12-4096-a519-cc0820008c88"
 migrations_dir = "cloudflare/migrations"
 
-# Cycling graph artifacts for /api/route. Upload nodes.ndjson + edges.ndjson
-# produced by scripts/cycling_build_graph.js into this bucket. Until the bucket
-# is created and populated, /api/route returns 503 with a clear message.
+# Cycling graph tiles for /api/route. The graph is split into ~5km cells
+# (lib/cycling/tile_partition.js, TILE_DEG=0.05) and stored as one NDJSON
+# per tile under the tiles/ prefix. Worker fetches just the tiles it needs.
 #
-# Create with:
-#   wrangler r2 bucket create ride-oasis-cycling-graph
-# Upload with:
-#   wrangler r2 object put ride-oasis-cycling-graph/nodes.ndjson --file=data/cycling/nodes.ndjson
-#   wrangler r2 object put ride-oasis-cycling-graph/edges.ndjson --file=data/cycling/edges.ndjson
+# Full pipeline (run locally on a machine with ~8GB RAM):
+#   1. Download regional PBF, e.g. Kansai:
+#        curl -O https://download.geofabrik.de/asia/japan/kansai-latest.osm.pbf
+#   2. Extract cycling graph:
+#        node scripts/cycling_build_graph.js \
+#          --pbf kansai-latest.osm.pbf --out data/cycling
+#   3. Split into tiles:
+#        node scripts/cycling_tile_split.js --dir data/cycling
+#   4. Upload tiles + index to R2:
+#        for f in data/cycling/tiles/*.ndjson; do
+#          k=$(basename "$f" .ndjson)
+#          wrangler r2 object put "ride-oasis-cycling-graph/tiles/$k.ndjson" --file="$f"
+#        done
+#        wrangler r2 object put ride-oasis-cycling-graph/tile_index.json \
+#          --file=data/cycling/tile_index.json
+#
+# Until tiles are uploaded /api/route returns 503 with a clear message and
+# the frontend falls back to a straight line.
 [[r2_buckets]]
 binding = "GRAPH"
 bucket_name = "ride-oasis-cycling-graph"
