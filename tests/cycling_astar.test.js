@@ -139,3 +139,24 @@ test('A*: goal ノードが view に居なくても落ちない', () => {
 test('MIN_COST_FACTOR は 0.7 (cycleway 相当, admissibility 保証)', () => {
   assert.equal(MIN_COST_FACTOR, 0.7);
 });
+
+test('aStarOnView: 旧形式 view (nodeIdToIndex/indexToNodeId 無し) でも動く', () => {
+  // 外部から手作りされた view (TileLoader を介さない) は sidecar を持たない
+  // ことがある。後方互換のため即時クラッシュではなくフォールバックで index
+  // 射影を構築する。
+  const view = {
+    nodes: new Map([
+      [10, [0, 0]],
+      [20, [0.001, 0]],
+      [30, [0.002, 0]]
+    ]),
+    fwd: new Map([
+      [10, [{ from: 10, to: 20, cost: 50 }]],
+      [20, [{ from: 20, to: 30, cost: 50 }]]
+    ]),
+    rev: new Map()
+  };
+  const r = aStarOnView(view, 10, 30);
+  assert.equal(r.distance, 100);
+  assert.deepEqual(r.path, [10, 20, 30]);
+});
