@@ -23,7 +23,7 @@ test('straightLineMeters: 同一点は 0', () => {
   assert.equal(straightLineMeters(135.5, 34.7, 135.5, 34.7), 0);
 });
 
-test('MAX_STRAIGHT_LINE_METERS は 15km', () => {
+test('MAX_STRAIGHT_LINE_METERS は 15km (CPU 実測上限)', () => {
   assert.equal(MAX_STRAIGHT_LINE_METERS, 15000);
 });
 
@@ -34,7 +34,7 @@ test('TiledRouter: 閾値超なら too_far を即返し、tile load しない', 
     return null;
   });
   const router = new TiledRouter(loader);
-  // 大阪駅 → 京都駅 (~40km)
+  // 大阪駅 → 京都駅 (~40km) は cap 15km 超
   const r = await router.route(135.4959, 34.7026, 135.7585, 34.9858);
   assert.equal(r.error, 'too_far');
   assert.ok(r.straight_line_m > 35000);
