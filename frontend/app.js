@@ -1866,6 +1866,32 @@ async function handleRwgFetch(event) {
   }
 }
 
+/**
+ * Calls the Worker /api/route endpoint and returns the [lon, lat] polyline.
+ * Returns null on any error so the caller can fall back to a straight line.
+ */
+async function fetchCyclingRoute(from, to, loadToken) {
+  const qs = new URLSearchParams({
+    from: `${from[0]},${from[1]}`,
+    to: `${to[0]},${to[1]}`
+  });
+  try {
+    const res = await fetch(`/api/route?${qs.toString()}`, {
+      headers: { accept: 'application/geo+json' }
+    });
+    if (loadToken !== latestRouteLoadToken) return null;
+    if (!res.ok) return null;
+    const json = await res.json();
+    const coords = json && json.geometry && Array.isArray(json.geometry.coordinates)
+      ? json.geometry.coordinates
+      : null;
+    if (!coords || coords.length < 2) return null;
+    return coords;
+  } catch (_err) {
+    return null;
+  }
+}
+
 /** Records a manual map click as start (1st click) or goal (2nd click) and refreshes the map. */
 async function handleManualMapClick(mapCoord) {
   if (manualPoints.length >= 2) return;
@@ -1889,15 +1915,28 @@ async function handleManualMapClick(mapCoord) {
     return;
   }
 
-  routeFeature = routeSource.getFeatures()[0] || null;
-  routeCoordinates = manualPoints.map((coord) => [coord[0], coord[1]]);
+  setStatus('ルート計算中…');
+  const routed = await fetchCyclingRoute(manualPoints[0], manualPoints[1], loadToken);
+  if (loadToken !== latestRouteLoadToken) return;
+
+  const coords = routed || manualPoints.map((coord) => [coord[0], coord[1]]);
+  if (routed) {
+    const parsedRoute = createRouteFeatureFromCoords(coords);
+    routeFeature = parsedRoute.feature;
+    clearRouteVisualSources();
+    renderRoute(parsedRoute.feature);
+  } else {
+    routeFeature = routeSource.getFeatures()[0] || null;
+  }
+
+  routeCoordinates = coords;
   routeElevations = [];
   rebuildRouteElevationCache();
   resetResults();
   updateRoutePointCount();
   fitToVisibleData();
   renderElevationChart();
-  setStatus('手動経路を生成しました');
+  setStatus(routed ? '自転車ルートを生成しました' : 'ルート計算 API 未配備のため直線で生成しました');
   syncUrlState();
   if (loadToken !== latestRouteLoadToken) return;
   await refreshMap([...routeCoordinates]);
