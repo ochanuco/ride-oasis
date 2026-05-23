@@ -1,0 +1,10 @@
+# mise: dev tool versions for ride-oasis
+#
+# - node 22: matches CI (.github/workflows/unit-tests.yml runs on 22 + 24).
+# - rust stable: used by the experimental rust-router/ cycling A* PoC.
+# - wasm-pack: builds the rust crate to wasm32 for bench/Worker integration.
+
+[tools]
+node = "22"
+rust = "stable"
+"cargo:wasm-pack" = "latest"
