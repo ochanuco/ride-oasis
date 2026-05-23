@@ -87,6 +87,7 @@ async function handleRoute(url, env) {
   if (r.error) {
     const status =
       r.error === 'unreachable_in_corridor' ? 404 :
+      r.error === 'too_far' ? 422 :
       r.error === 'no_nearby_node_from' || r.error === 'no_nearby_node_to' ? 422 :
       500;
     return Response.json(r, { status });

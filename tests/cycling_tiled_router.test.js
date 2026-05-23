@@ -64,9 +64,9 @@ test('TiledRouter: 隣接タイル跨ぎ A→C を解ける', async () => {
 test('TiledRouter: 近すぎる点が無いと no_nearby_node_from', async () => {
   const data = buildKansaiSyntheticTiles();
   const loader = new TileLoader(memFetcher(data));
+  // maxSnapMeters=10 で、from は合成データから 1km 以上離れた点 (straight line cap は通る)
   const router = new TiledRouter(loader, { maxSnapMeters: 10 });
-  // 100km 離れた点 → snap 不可
-  const r = await router.route(140.0, 36.0, 135.55, 34.70);
+  const r = await router.route(135.40, 34.70, 135.55, 34.70);
   assert.equal(r.error, 'no_nearby_node_from');
 });
 
