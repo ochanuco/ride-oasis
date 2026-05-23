@@ -252,7 +252,8 @@ test('Map Data: ORDER BY は単一 PRIMARY KEY のみ (LIMIT/OFFSET ページン
     limit: 100,
     offset: 0
   });
-  assert.match(sql, /ORDER BY supply_point_id\b/);
-  // 旧 3 列ソートは復活していない
-  assert.equal(/ORDER BY chain/.test(sql), false);
+  // 単一キー (supply_point_id) のみで LIMIT に直結。複合キー混入を禁止
+  assert.match(sql, /ORDER BY\s+supply_point_id\s+LIMIT/);
+  assert.equal(/ORDER BY\s+supply_point_id\s*,/.test(sql), false);
+  assert.equal(/ORDER BY\s+chain/.test(sql), false);
 });
