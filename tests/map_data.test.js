@@ -198,3 +198,59 @@ test('Map Data: GeoJSON FeatureCollection を生成できる', () => {
   assert.equal(collection.features[0].geometry.type, 'Point');
   assert.deepEqual(collection.features[0].geometry.coordinates, [139.2, 35.1]);
 });
+
+test('Map Data: frontend 未使用の列は properties から落とす (payload 軽量化)', () => {
+  const collection = toFeatureCollection([
+    {
+      supply_point_id: 'lawson:1',
+      chain: 'lawson',
+      store_id: '1',
+      name: 'L',
+      lat: 35.0,
+      lng: 139.0,
+      address_norm: '東京都',
+      geocode_level: 3,
+      geocode_point_level: 8,
+      source_url: 'https://example.com',
+      updated_at: '2026-04-01T00:00:00Z'
+    }
+  ]);
+  const props = collection.features[0].properties;
+  // 使われる列のみ残る
+  assert.equal(props.supply_point_id, 'lawson:1');
+  assert.equal(props.chain, 'lawson');
+  assert.equal(props.name, 'L');
+  assert.equal(props.address_norm, '東京都');
+  assert.equal(props.geocode_point_level, 8);
+  // 落とされる列
+  assert.equal(Object.prototype.hasOwnProperty.call(props, 'source_url'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(props, 'store_id'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(props, 'updated_at'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(props, 'geocode_level'), false);
+});
+
+test('Map Data: SELECT に不要列が含まれない', () => {
+  const { sql } = buildSupplyPointsQuery({
+    bbox: { minLng: 139, minLat: 35, maxLng: 140, maxLat: 36 },
+    chains: null,
+    minPointLevel: 8,
+    limit: 100,
+    offset: 0
+  });
+  // 落とした列が SELECT に出ない
+  assert.equal(sql.includes('source_url'), false);
+  assert.equal(sql.includes('updated_at'), false);
+  assert.equal(/SELECT[^F]*store_id/.test(sql), false);
+  assert.equal(/SELECT[^F]*geocode_level[^_]/.test(sql), false);
+});
+
+test('Map Data: ORDER BY 削除済 (sort のオーバヘッド回避)', () => {
+  const { sql } = buildSupplyPointsQuery({
+    bbox: { minLng: 139, minLat: 35, maxLng: 140, maxLat: 36 },
+    chains: null,
+    minPointLevel: 8,
+    limit: 100,
+    offset: 0
+  });
+  assert.equal(/ORDER BY/i.test(sql), false);
+});
