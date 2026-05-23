@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { once } = require('events');
+const { finished } = require('stream/promises');
 
 const { buildContractionHierarchy } = require('../lib/cycling/ch_builder');
 
@@ -94,9 +95,8 @@ async function main() {
     lw += 1;
     if (lw % BACKPRESSURE_CHECK_INTERVAL === 0) await drainIfNeeded(levelsOut);
   }
-  await new Promise((resolve, reject) =>
-    levelsOut.end((e) => (e ? reject(e) : resolve()))
-  );
+  levelsOut.end();
+  await finished(levelsOut);
 
   const edgesOut = createBufferedStream(chEdgesPath);
   let ew = 0;
@@ -105,9 +105,8 @@ async function main() {
     ew += 1;
     if (ew % BACKPRESSURE_CHECK_INTERVAL === 0) await drainIfNeeded(edgesOut);
   }
-  await new Promise((resolve, reject) =>
-    edgesOut.end((e) => (e ? reject(e) : resolve()))
-  );
+  edgesOut.end();
+  await finished(edgesOut);
 
   process.stderr.write(
     `wrote ${levelsPath} and ${chEdgesPath} (total ${((Date.now() - t0) / 1000).toFixed(1)}s)\n`

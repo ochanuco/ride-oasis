@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { once } = require('events');
+const { finished } = require('stream/promises');
 
 const { classifyWay } = require('../lib/cycling/tag_classifier');
 const { edgesForWay } = require('../lib/cycling/graph_builder');
@@ -105,9 +106,10 @@ async function passWays(pbfPath, outDir, limit) {
     limit
   );
 
-  await new Promise((resolve, reject) => {
-    waysOut.end((err) => (err ? reject(err) : resolve()));
-  });
+  // stream.end(callback) は 'finish' のみで 'error' を取りこぼすため
+  // stream/promises.finished() で両方を確実に拾う。
+  waysOut.end();
+  await finished(waysOut);
 
   const sorted = new Float64Array(neededIds.size);
   let i = 0;
@@ -163,9 +165,8 @@ async function passNodes(pbfPath, outDir, limit) {
     limit
   );
 
-  await new Promise((resolve, reject) => {
-    nodesOut.end((err) => (err ? reject(err) : resolve()));
-  });
+  nodesOut.end();
+  await finished(nodesOut);
 
   return { nodesSeen, nodesKept };
 }
@@ -209,9 +210,8 @@ async function passJoin(outDir) {
     }
   }
 
-  await new Promise((resolve, reject) => {
-    edgesOut.end((err) => (err ? reject(err) : resolve()));
-  });
+  edgesOut.end();
+  await finished(edgesOut);
   return { waysProcessed, edges, skippedMissingNode, skippedZeroLength };
 }
 

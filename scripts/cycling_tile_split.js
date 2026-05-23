@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { finished } = require('stream/promises');
 
 const { tileKey } = require('../lib/cycling/tile_partition');
 
@@ -151,9 +152,10 @@ async function main() {
   process.stderr.write(`  directed edge records=${edgeRecords} in ${Date.now() - t1}ms\n`);
 
   await Promise.all(
-    [...tileStreams.values()].map(
-      (s) => new Promise((resolve, reject) => s.end((e) => (e ? reject(e) : resolve())))
-    )
+    [...tileStreams.values()].map(async (s) => {
+      s.end();
+      await finished(s);
+    })
   );
 
   const tileKeys = [...tileStats.keys()].sort();
