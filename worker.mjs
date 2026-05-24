@@ -55,14 +55,15 @@ function ensureTileLoader(env) {
   // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
   // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
   tileLoaderCache = new TileLoader(
-    // cacheVersion を bump して旧 (v3 = v1 タイル) cache エントリを bypass。
-    // PR #72 で chQuery 停止条件修正 + PR #74 で coreBit (partial CH core
-    // lateral relax) 実装後、coreBit 付き v2 タイルを再投入。
-    // v4 で fresh fetch を強制し、enableCh=true で CH を本番有効化する。
-    // chQuery 失敗 (SETTLED_CAP 到達 / unreachable) 時は TiledRouter が
-    // 自動的に NBA* fallback するので CPU 1102 のリスクなし。
-    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v4'),
-    { enableCh: true }
+    // PR #75 で CH 本番投入 (v4 + enableCh=true) → 本番で CPU 1102 再発を
+    // 確認したため hot rollback。SETTLED_CAP=20000 防御弁 + coreBit lateral
+    // relax を入れても 3km route で CPU 超過してしまう。原因究明 (CH builder
+    // の正当性、stalling on demand 未実装、shortcut explosion 等) は別途。
+    // v5 で edge cache をパージし、enableCh は外して NBA* に戻す。
+    // 注: R2 には v2 タイル (coreBit 付き) が残っているが、enableCh=false
+    // なので TileLoader が shortcut edge (viaId != 0) を filter し、original
+    // edge のみで NBA* を走らせる (既存 v2-without-CH ロジック)。
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v5')
   );
   return tileLoaderCache;
 }
