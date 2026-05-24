@@ -17,15 +17,17 @@ function makeView() {
     nodeIdToIndex: new Map(),
     indexToNodeId: [],
     levels: new Map(),
+    cores: new Set(),
     hasCh: false
   };
 }
 
-function addNode(view, id, lon, lat, level) {
+function addNode(view, id, lon, lat, level, core) {
   view.nodes.set(id, [lon, lat]);
   view.nodeIdToIndex.set(id, view.indexToNodeId.length);
   view.indexToNodeId.push(id);
   if (level !== undefined) view.levels.set(id, level);
+  if (core) view.cores.add(id);
 }
 
 function ensure(m, k) {
@@ -123,6 +125,35 @@ test('CH: 無 level (旧形式) は Infinity', () => {
   link(view, 1, 2, 100);
   const r = chQueryOnView(view, 1, 2);
   assert.equal(r.distance, Infinity);
+});
+
+test('CH: core-core lateral relax (level 制約なしで横移動可能)', () => {
+  // 0 (level=10, core=1) - 1 (level=5, core=1) - 2 (level=10, core=0)
+  // 0→1 は level 10→5 で通常なら upward only に違反するが、両端 core なので relax 許可
+  // 2 は core でない (uncontracted top でも degree-skipped でもない通常ノード)
+  const view = makeView();
+  addNode(view, 0, 0, 0, 10, /*core*/ true);
+  addNode(view, 1, 0.001, 0, 5, /*core*/ true);
+  addNode(view, 2, 0.002, 0, 10, /*core*/ false);
+  link(view, 0, 1, 100); // core-core lateral
+  link(view, 1, 2, 100); // core-non_core upward (5→10) OK
+  const r = chQueryOnView(view, 0, 2);
+  assert.equal(r.distance, 200);
+});
+
+test('CH: core 無しで level 10→5 は relax 不可 (制約確認)', () => {
+  // 0 (level=10, core=0) - 1 (level=5, core=0)
+  // 通常 CH 制約で forward 0→1 不可、backward 1→0 も rev edge から見ると同様
+  const view = makeView();
+  addNode(view, 0, 0, 0, 10, /*core*/ false);
+  addNode(view, 1, 0.001, 0, 5, /*core*/ false);
+  link(view, 0, 1, 100);
+  const r = chQueryOnView(view, 0, 1);
+  // forward: 0 (L10) から 1 (L5) は下降 → skip
+  // backward: 1 (L5) から rev edge を見ても from=0 (L10) > to=1 (L5) なので upward OK
+  //   → backward は 0 を settle、forward は 0 を settle、distF=0, distB=100、meet at 0
+  // meeting=0、best=100。距離は OK
+  assert.equal(r.distance, 100);
 });
 
 test('CH と NBA* が同じ最短距離 (synthetic CH-encoded graph)', () => {

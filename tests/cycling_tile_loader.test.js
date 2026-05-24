@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { TileLoader } = require('../lib/cycling/tile_loader');
-const { encodeTile } = require('../lib/cycling/tile_binary');
+const { encodeTile, encodeTileV2 } = require('../lib/cycling/tile_binary');
 
 function makeMemFetcher(data) {
   return async (key) => (key in data ? data[key] : null);
@@ -157,3 +157,33 @@ test('容量到達 ∧ 他者進行中のとき新規 load は skip', async () =
   gates.get('C').release();
   await pC;
 });
+
+test('v2 tile + enableCh=true: levels と cores が view に反映される', async () => {
+  const buf = encodeTileV2(
+    [
+      { id: 1, lon: 0, lat: 0, level: 10, core: 0 },
+      { id: 2, lon: 0.001, lat: 0, level: 20, core: 1 }
+    ],
+    [{ from: 1, to: 2, toLon: 0.001, toLat: 0, cost: 100, viaId: 0 }]
+  );
+  const loader = new TileLoader(makeMemFetcher({ A: buf }), { enableCh: true });
+  await loader.load('A');
+  assert.equal(loader.view.hasCh, true);
+  assert.equal(loader.view.levels.get(1), 10);
+  assert.equal(loader.view.levels.get(2), 20);
+  assert.equal(loader.view.cores.has(1), false);
+  assert.equal(loader.view.cores.has(2), true);
+});
+
+test('v2 tile + enableCh 既定 (false): hasCh=false、levels/cores は空', async () => {
+  const buf = encodeTileV2(
+    [{ id: 1, lon: 0, lat: 0, level: 10, core: 1 }],
+    []
+  );
+  const loader = new TileLoader(makeMemFetcher({ A: buf }));
+  await loader.load('A');
+  assert.equal(loader.view.hasCh, false);
+  assert.equal(loader.view.levels.size, 0);
+  assert.equal(loader.view.cores.size, 0);
+});
+
