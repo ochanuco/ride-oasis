@@ -40,7 +40,8 @@ count=$(find "$TILES_DIR" -name '*.bin' | wc -l | tr -d ' ')
 echo "uploading $count tiles from $TILES_DIR to r2://$BUCKET/$PREFIX (concurrency=$CONCURRENCY)"
 
 # xargs で並列に `wrangler r2 object put --remote` を回す。各 put は
-# 一過性の DNS/接続エラーに備えて 3 回までリトライ (指数バックオフ)。
+# 一過性の DNS/接続エラーに備えて 3 回までリトライ (指数バックオフ 1s/2s)。
+# 最終試行後は待機せずに即 exit 1 して失敗検知を遅らせない。
 # それでも失敗すれば子プロセスが exit 1 を返し xargs/set -e で全体 fail。
 # upload は idempotent (R2 last-write-wins) なので、全体失敗時はスクリプト
 # を単純に再実行すれば残りも処理される。
@@ -48,13 +49,16 @@ find "$TILES_DIR" -name '*.bin' -print0 \
   | xargs -0 -P "$CONCURRENCY" -I{} bash -c '
       f="$1"
       key="'"$PREFIX"'$(basename "$f")"
-      for attempt in 1 2 3; do
+      max_attempts=3
+      for attempt in $(seq 1 $max_attempts); do
         if npx wrangler r2 object put "'"$BUCKET"'/$key" --file="$f" --remote >/dev/null 2>&1; then
           exit 0
         fi
-        sleep $((attempt * 2))
+        if [ "$attempt" -lt "$max_attempts" ]; then
+          sleep $((2 ** (attempt - 1)))  # 1, 2 (試行間), 最終試行後は待たない
+        fi
       done
-      echo "FAIL after 3 retries: $key" >&2
+      echo "FAIL after $max_attempts retries: $key" >&2
       exit 1
     ' _ {}
 
