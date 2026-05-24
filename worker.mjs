@@ -141,7 +141,8 @@ async function handleRoute(url, env) {
         node_count: r.node_count,
         settled: r.settled,
         snap_from_m: r.snap_from_m,
-        snap_to_m: r.snap_to_m
+        snap_to_m: r.snap_to_m,
+        algorithm: r.algorithm
       }
     },
     {
