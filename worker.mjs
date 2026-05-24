@@ -52,9 +52,9 @@ function ensureTileLoader(env) {
   // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
   // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
   tileLoaderCache = new TileLoader(
-    // cacheVersion='v2' で旧 v1 タイル時代の edge cache エントリを bypass。
-    // タイル形式を変えたら必ず bump する (v3 へ更新時は 'v3' に)。
-    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v2')
+    // cacheVersion を bump して旧 (v2 タイル) cache エントリを bypass。
+    // v1 タイル運用に戻したので v3 で fresh fetch を強制。
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v3')
   );
   return tileLoaderCache;
 }
