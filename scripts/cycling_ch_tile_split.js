@@ -23,10 +23,11 @@ function usage() {
     'Usage: node scripts/cycling_ch_tile_split.js --dir <graphDir>',
     '',
     'Reads nodes.ndjson + ch_levels.ndjson + ch_edges.ndjson and writes:',
-    '  <graphDir>/tiles/{x}_{y}.bin  - binary v2 tile (level + viaId per edge)',
+    '  <graphDir>/tiles/{x}_{y}.bin  - binary v2 tile (level + coreBit + viaId per edge)',
     '  <graphDir>/tile_index.json    - { tiles, cell_deg, bbox, format }',
     '',
-    'v2 tiles preserve CH metadata: nodes carry their hierarchy level,',
+    'v2 tiles preserve CH metadata: nodes carry their hierarchy level',
+    'and a coreBit (1 = uncontracted core, allows lateral relax in query);',
     'edges carry a viaId (0 for original, nonzero for shortcut).'
   ].join('\n');
 }
@@ -97,12 +98,21 @@ async function main() {
   const t1 = Date.now();
   process.stderr.write(`[pass 2/3] reading CH levels from ${levelsPath}\n`);
   let levelCount = 0;
+  let coreCount = 0;
+  // core ノード集合。CH builder (rust-router) の出力 ch_levels.ndjson に
+  // 含まれる core=1 (uncontracted top fraction + degree-skipped) を保持。
+  // tile encoder 側で level の高位ビットに coreBit として詰める。
+  const cores = new Set();
   await streamLines(levelsPath, (line) => {
     const l = JSON.parse(line);
     levels.set(l.id, l.level);
+    if (l.core === 1) {
+      cores.add(l.id);
+      coreCount += 1;
+    }
     levelCount += 1;
   });
-  process.stderr.write(`  levels=${levelCount} in ${Date.now() - t1}ms\n`);
+  process.stderr.write(`  levels=${levelCount} core=${coreCount} in ${Date.now() - t1}ms\n`);
 
   // assemble per-tile node lists now that we know levels
   for (const [id, [lon, lat]] of nodes) {
@@ -112,7 +122,13 @@ async function main() {
       arr = [];
       tileNodes.set(key, arr);
     }
-    arr.push({ id, lon, lat, level: levels.get(id) || 0 });
+    arr.push({
+      id,
+      lon,
+      lat,
+      level: levels.get(id) || 0,
+      core: cores.has(id) ? 1 : 0
+    });
   }
 
   const pushEdge = (key, edge) => {
