@@ -119,3 +119,43 @@ test('サイズが NDJSON 比で大幅に縮む (~4x 以上)', () => {
 test('Version 定数が 1', () => {
   assert.equal(VERSION, 1);
 });
+
+const { encodeTileV2, VERSION_CH, NODE_BYTES_V2, EDGE_BYTES_V2 } = require('../lib/cycling/tile_binary');
+
+test('v2 round-trip: 単一ノード + level / 単一 shortcut edge', () => {
+  const nodes = [{ id: 100, lon: 135.5, lat: 34.7, level: 42 }];
+  const edges = [
+    { from: 100, to: 200, toLon: 135.51, toLat: 34.71, cost: 250, viaId: 0 },
+    { from: 200, to: 300, toLon: 135.52, toLat: 34.72, cost: 500, viaId: 100 }
+  ];
+  const buf = encodeTileV2(nodes, edges);
+  assert.equal(buf.byteLength, HEADER_BYTES + NODE_BYTES_V2 + EDGE_BYTES_V2 * 2);
+  const r = decodeTile(buf);
+  assert.equal(r.version, VERSION_CH);
+  assert.equal(r.nodes[0].id, 100);
+  assert.equal(r.nodes[0].level, 42);
+  assert.equal(r.edges[0].viaId, 0);
+  assert.equal(r.edges[1].viaId, 100);
+  assert.ok(Math.abs(r.edges[1].cost - 500) < 0.1);
+});
+
+test('v1 decode は level=0 / viaId=0 を補完して返す (v2 と同一形状)', () => {
+  const nodes = [{ id: 1, lon: 135, lat: 34 }];
+  const edges = [{ from: 1, to: 2, toLon: 135.01, toLat: 34, cost: 100 }];
+  const r = decodeTile(encodeTile(nodes, edges));
+  assert.equal(r.nodes[0].level, 0);
+  assert.equal(r.edges[0].viaId, 0);
+});
+
+test('v2 サイズは v1 比 ~40% 増 (level + viaId 分)', () => {
+  const nodes = Array.from({ length: 100 }, (_, i) => ({
+    id: i, lon: 135 + i * 0.001, lat: 34, level: i % 16
+  }));
+  const edges = Array.from({ length: 200 }, (_, i) => ({
+    from: i % 100, to: (i + 1) % 100, toLon: 135, toLat: 34, cost: 100, viaId: 0
+  }));
+  const v1Size = encodeTile(nodes, edges).byteLength;
+  const v2Size = encodeTileV2(nodes, edges).byteLength;
+  // v2 は node +4B (level), edge +12B (pad + viaId) なので 100*4 + 200*12 = 2800B 増
+  assert.equal(v2Size - v1Size, 100 * 4 + 200 * 12);
+});

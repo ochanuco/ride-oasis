@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 const { once } = require('events');
 const { finished } = require('stream/promises');
 
@@ -45,9 +46,15 @@ function usage() {
   ].join('\n');
 }
 
-function loadEdges(filePath) {
+async function loadEdges(filePath) {
+  // readFileSync('utf8') is 512MB-capped by V8. Kansai edges.ndjson is ~1.1GB
+  // so we stream line by line.
   const out = [];
-  for (const line of fs.readFileSync(filePath, 'utf8').split('\n')) {
+  const rl = readline.createInterface({
+    input: fs.createReadStream(filePath, { encoding: 'utf8' }),
+    crlfDelay: Infinity
+  });
+  for await (const line of rl) {
     if (!line) continue;
     out.push(JSON.parse(line));
   }
@@ -75,7 +82,7 @@ async function main() {
 
   const t0 = Date.now();
   process.stderr.write(`loading edges from ${edgesPath}...\n`);
-  const edges = loadEdges(edgesPath);
+  const edges = await loadEdges(edgesPath);
   process.stderr.write(`  edges=${edges.length} loaded in ${Date.now() - t0}ms\n`);
 
   const t1 = Date.now();
