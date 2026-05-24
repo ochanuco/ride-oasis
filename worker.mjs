@@ -55,11 +55,14 @@ function ensureTileLoader(env) {
   // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
   // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
   tileLoaderCache = new TileLoader(
-    // PR #81 (Phase 1.5 maxTiles=16) も exceededMemory が再発。snap の
-    // loadMany が corridor の上に追加 9 タイル乗せて 16 を超えてしまう
-    // ことや、JS object 表現自体が密度高すぎる可能性。CSR refactor までは
-    // CH を諦めて NBA* で安定動作する。cache v11。
-    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v11')
+    // PR #83: CH ephemeral CSR モード (typed-array per-request build)。
+    // - enableCh=false: view は shortcut を**含まない** NBA*-baseline (~70MB)
+    // - TiledRouter.useChCsr=true: CH 経路は ephemeral CSR (~50MB) を
+    //   request 毎に build → query → release
+    // - 合計 view 70MB + CSR ephemeral 50MB ≒ 120MB で Workers 128MB に収まる想定
+    // cache v12 (v11=NBA* バージョンを bypass)
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v12'),
+    { enableCh: false, maxTiles: 32 }
   );
   return tileLoaderCache;
 }
@@ -142,7 +145,7 @@ async function handleRoute(url, env) {
     }
     throw err;
   }
-  const router = new TiledRouter(loader);
+  const router = new TiledRouter(loader, { useChCsr: true });
   const r = await router.route(from[0], from[1], to[0], to[1]);
   if (r.error) {
     const status =
@@ -239,7 +242,7 @@ async function handleDnfPack(url, env) {
     }
     throw err;
   }
-  const router = new TiledRouter(loader);
+  const router = new TiledRouter(loader, { useChCsr: true });
   const r = await router.route(from[0], from[1], to[0], to[1]);
   if (r.error) {
     const status =
