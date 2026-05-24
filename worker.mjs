@@ -55,13 +55,13 @@ function ensureTileLoader(env) {
   // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
   // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
   tileLoaderCache = new TileLoader(
-    // PR #83 (CSR ephemeral) も exceededMemory。CSR build 自体の中間 JS array
-    // (nodeOsmIds, idToIdx Map など) + view + tileBufs で peak が 128MB を
-    // 超過する模様。view を残したまま CSR を併用する構成は厳しい。
-    // 次の試み: view 自体も typed-array 化し、TileLoader は buffer cache 専用
-    // にする (GraphView を per-request build)。それまでは安定動作の NBA*
-    // モード。cache v13。
-    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v13')
+    // PR #85: CSR-only モード (TileLoader.view を一切使わない)。
+    // - loadBuffers のみで R2 fetch (ArrayBuffer cache、view 非 populate)
+    // - 各 request で buildCsr → snapCsr → chQueryCsr → release
+    // - persistent な decoded state なし。peak memory ≈ csr ~50MB + bufs ~16MB
+    // PR #83 で view + csr ephemeral 構成が exceededMemory だったため、view
+    // 自体を捨てる。cache v14。
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v14')
   );
   return tileLoaderCache;
 }
@@ -144,7 +144,7 @@ async function handleRoute(url, env) {
     }
     throw err;
   }
-  const router = new TiledRouter(loader);
+  const router = new TiledRouter(loader, { csrOnly: true });
   const r = await router.route(from[0], from[1], to[0], to[1]);
   if (r.error) {
     const status =
@@ -241,7 +241,7 @@ async function handleDnfPack(url, env) {
     }
     throw err;
   }
-  const router = new TiledRouter(loader);
+  const router = new TiledRouter(loader, { csrOnly: true });
   const r = await router.route(from[0], from[1], to[0], to[1]);
   if (r.error) {
     const status =

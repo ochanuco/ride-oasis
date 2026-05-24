@@ -27,7 +27,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (a === '--iters') args.iters = Number(argv[++i]);
     else if (a === '--dir') args.dir = argv[++i];
     else if (a === '--preload') args.preload = Number(argv[++i]);
-    else if (a === '--no-ch' || a === '--csr' || a === '--debug-csr') { /* flags consumed by main */ }
+    else if (a === '--no-ch' || a === '--csr' || a === '--csr-only' || a === '--debug-csr') { /* flags consumed by main */ }
     else throw new Error(`unknown arg: ${a}`);
   }
   if (!args.from || !args.to) throw new Error('--from / --to required');
@@ -45,9 +45,10 @@ async function main() {
   // --csr で CH CSR モード (per-request CSR build) を試す。
   const enableCh = !process.argv.includes('--no-ch');
   const useChCsr = process.argv.includes('--csr');
-  console.log(`[setup] enableCh=${enableCh} useChCsr=${useChCsr}`);
+  const csrOnly = process.argv.includes('--csr-only');
+  console.log(`[setup] enableCh=${enableCh} useChCsr=${useChCsr} csrOnly=${csrOnly}`);
   const loader = new TileLoader(fetcher, { enableCh, maxTiles: 2048 });
-  const router = new TiledRouter(loader, { useChCsr });
+  const router = new TiledRouter(loader, { useChCsr, csrOnly });
   // expose csr caps for debugging
   if (useChCsr) {
     const { chQueryCsr } = require('../lib/cycling/chquery_csr');
