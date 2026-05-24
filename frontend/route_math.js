@@ -110,6 +110,33 @@
     return [minLng, minLat, maxLng, maxLat];
   }
 
+  /**
+   * Snaps a bbox to a grid of `gridDeg` cells so similar routes share the same
+   * bounding box URL. With the Worker's edge cache (caches.default keyed on
+   * URL), this dramatically improves hit rate as the user pans / reloads
+   * routes within the same area, at the cost of a small over-fetch.
+   */
+  function quantizeBbox(bbox, gridDeg) {
+    if (
+      !Array.isArray(bbox) ||
+      bbox.length !== 4 ||
+      !bbox.every(Number.isFinite) ||
+      bbox[0] > bbox[2] ||
+      bbox[1] > bbox[3]
+    ) {
+      // 不正形状 (長さ不正 / NaN / min>max) を null で弾き、不正な
+      // URL クエリの組み立てを防ぐ。
+      return null;
+    }
+    const step = Number.isFinite(gridDeg) && gridDeg > 0 ? gridDeg : 0.01;
+    return [
+      Math.floor(bbox[0] / step) * step,
+      Math.floor(bbox[1] / step) * step,
+      Math.ceil(bbox[2] / step) * step,
+      Math.ceil(bbox[3] / step) * step
+    ];
+  }
+
   /** Expands a bbox by a meter padding converted around the route center latitude. */
   function expandBbox(bbox, meters) {
     if (!bbox) return null;
@@ -238,6 +265,7 @@
   return {
     computeBbox,
     expandBbox,
+    quantizeBbox,
     pointToPointDistanceMeters,
     pointToRouteDistanceMeters,
     bearingDegrees,
