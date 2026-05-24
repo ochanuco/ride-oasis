@@ -190,9 +190,13 @@ async function handleRoute(url, env) {
  *
  * 失敗時はルート単独のエラー (404 unreachable など) を踏襲。
  */
+// 空白だけの入力 (" ") は Number() が 0 に変換するため、空入力扱いに
+// 倒さないと tolerance_m=" " が simplify off に化ける。trim → 空判定で防ぐ。
 function parsePositiveNumber(raw, fallback, max) {
-  if (raw == null || raw === '') return fallback;
-  const v = Number(raw);
+  if (raw == null) return fallback;
+  const normalized = String(raw).trim();
+  if (normalized === '') return fallback;
+  const v = Number(normalized);
   if (!Number.isFinite(v) || v <= 0) return fallback;
   return Math.min(v, max);
 }
@@ -200,9 +204,12 @@ function parsePositiveNumber(raw, fallback, max) {
 // tolerance_m=0 は「simplify を無効化する」契約 (douglasPeucker 仕様)。
 // parsePositiveNumber は 0 を fallback に化けさせるため、専用の
 // non-negative パーサで 0 を許可する。負値・NaN は fallback に倒す。
+// trim 処理も同様 (空白入力で 0 化けを防ぐ)。
 function parseNonNegativeNumber(raw, fallback, max) {
-  if (raw == null || raw === '') return fallback;
-  const v = Number(raw);
+  if (raw == null) return fallback;
+  const normalized = String(raw).trim();
+  if (normalized === '') return fallback;
+  const v = Number(normalized);
   if (!Number.isFinite(v) || v < 0) return fallback;
   return Math.min(v, max);
 }
