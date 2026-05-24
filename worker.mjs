@@ -55,15 +55,14 @@ function ensureTileLoader(env) {
   // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
   // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
   tileLoaderCache = new TileLoader(
-    // PR #79: CH 再投入 Phase 1.
-    // - shortcut edge を view.scFwd/scRev (packed flat number 配列)
-    //   に分離し、view.fwd/rev には original edge のみ載せる。NBA* は
-    //   fwd/rev だけ参照すれば shortcut 不要、chQuery 経路だけ scFwd を
-    //   走査する (lib/cycling/tile_loader._mergeBinary + tiled_router)
-    // - maxTiles を 128 → 32 に絞り、view の総量を抑える (Codex 推奨)
-    // - cache version v7 → v8 へ bump
-    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v8'),
-    { enableCh: true, maxTiles: 32 }
+    // PR #79 (CH Phase 1) merge 後 production で再び exceededMemory を確認。
+    // shortcut の packed flat 化 + maxTiles=32 でも Workers 128MB を超過。
+    // chQuery 到達前 (tile load / decode 中) にメモリ枯渇している様子で、
+    // log にも到達しない。
+    // hot rollback: enableCh 削除 + cache v9 で v8 をパージ。
+    // 根本対処 Phase 2 (orig edges も typed array 化、tile shard 化等)
+    // は別 PR で検討中。
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v9')
   );
   return tileLoaderCache;
 }
