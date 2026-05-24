@@ -40,7 +40,10 @@ async function main() {
   const fetcher = makeFsFetcher(args.dir);
   // 本番 worker と同じ enableCh=true 設定。
   // maxTiles を緩めて preload で view を巨大化できるようにする。
-  const loader = new TileLoader(fetcher, { enableCh: true, maxTiles: 2048 });
+  // --no-ch で enableCh=false 比較ベンチが取れる。
+  const enableCh = !process.argv.includes('--no-ch');
+  console.log(`[setup] enableCh=${enableCh}`);
+  const loader = new TileLoader(fetcher, { enableCh, maxTiles: 2048 });
   const router = new TiledRouter(loader);
 
   // preload で異なる bbox の N タイルを先にロードして、本番 isolate に
@@ -67,10 +70,18 @@ async function main() {
   const corridor = corridorKeys(args.from[0], args.from[1], args.to[0], args.to[1], 1);
   console.log(`[setup] corridor tiles: ${corridor.length}`);
   const tLoad0 = process.hrtime.bigint();
+  if (global.gc) global.gc();
+  const memBeforeLoad = process.memoryUsage();
   await loader.loadMany(corridor);
   const tLoad1 = process.hrtime.bigint();
   console.log(`[setup] tiles loaded in ${Number(tLoad1 - tLoad0) / 1e6}ms`);
-  console.log(`[setup] view.nodes=${loader.view.nodes.size} fwd_adj=${loader.view.fwd.size} levels=${loader.view.levels.size} cores=${loader.view.cores.size} hasCh=${loader.view.hasCh}`);
+  console.log(`[setup] view.nodes=${loader.view.nodes.size} fwd_adj=${loader.view.fwd.size} levels=${loader.view.levels.size} cores=${loader.view.cores.size} scFwd=${loader.view.scFwd?.size || 0} hasCh=${loader.view.hasCh}`);
+  if (global.gc) global.gc();
+  const memAfterLoad = process.memoryUsage();
+  const deltaHeap = (memAfterLoad.heapUsed - memBeforeLoad.heapUsed) / 1024 / 1024;
+  const deltaRss = (memAfterLoad.rss - memBeforeLoad.rss) / 1024 / 1024;
+  console.log(`[mem] view footprint delta: heap=+${deltaHeap.toFixed(1)}MB rss=+${deltaRss.toFixed(1)}MB`);
+  console.log(`[mem] absolute rss=${(memAfterLoad.rss / 1024 / 1024).toFixed(1)}MB heapUsed=${(memAfterLoad.heapUsed / 1024 / 1024).toFixed(1)}MB heapTotal=${(memAfterLoad.heapTotal / 1024 / 1024).toFixed(1)}MB external=${(memAfterLoad.external / 1024 / 1024).toFixed(1)}MB`);
 
   // edge count + max degree
   let edgeTotal = 0;
