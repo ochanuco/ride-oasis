@@ -55,15 +55,14 @@ function ensureTileLoader(env) {
   // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
   // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
   tileLoaderCache = new TileLoader(
-    // PR #77: CH 再投入 with **超タイトな defensive caps + テレメトリ**。
-    // SETTLED_CAP=5000 / POPS_CAP=30000 / TIME_BUDGET_MS=800 でどんな
-    // pathological case でも 1 秒以内に Infinity を返し NBA* fallback に
-    // 逃がす。chQuery の各種 timing は console.log でテレメトリ出力し
-    // wrangler tail で production の実態を観測する (CH 完走率 / 平均 chMs
-    // / fallback 比率)。
-    // cache v6 で前 v5 (NBA* 応答) を bypass。
-    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v6'),
-    { enableCh: true }
+    // PR #77 で CH 再投入 → wrangler tail で `outcome: exceededMemory` が
+    // 確認できた (128MB 制限超過; CPU ではなくメモリが原因だった)。
+    // CH 有効時は shortcut edge が view に追加され、shortcut/original = 1:1
+    // 程度のため adjacency list が倍化する。これと隣接 Map (levels/cores)
+    // とで Workers メモリ予算を超過する。
+    // 根本対処 (typed-array adjacency 化 / shortcut の lazy 解決 等) は
+    // 別 PR。本コミットでは緊急 rollback として enableCh を外し v7 にする。
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v7')
   );
   return tileLoaderCache;
 }
