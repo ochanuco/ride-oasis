@@ -1886,11 +1886,14 @@ function routeCacheKey(from, to) {
 }
 
 function readRouteCache(from, to) {
+  const key = routeCacheKey(from, to);
   try {
-    const raw = window.localStorage?.getItem(routeCacheKey(from, to));
+    const raw = window.localStorage?.getItem(key);
     if (!raw) return null;
     const obj = JSON.parse(raw);
     if (!obj || typeof obj.ts !== 'number' || Date.now() - obj.ts > ROUTE_CACHE_TTL_MS) {
+      // 期限切れエントリは読取時に削除して localStorage 容量を圧迫しない
+      try { window.localStorage?.removeItem(key); } catch (_) { /* ignore */ }
       return null;
     }
     return obj.payload || null;
