@@ -20,7 +20,11 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 function usage() {
   return [
-    'Usage: node scripts/cycling_ch_tile_split.js --dir <graphDir>',
+    'Usage: node --max-old-space-size=12288 scripts/cycling_ch_tile_split.js --dir <graphDir>',
+    '  (or: npm run cycling:ch-tile-split -- --dir <graphDir>)',
+    '',
+    'Note: --max-old-space-size=12288 (12GB) is required for Kansai-scale',
+    '  (7.6M nodes + 18M directed edges). Default 4GB heap OOMs in pass 3.',
     '',
     'Reads nodes.ndjson + ch_levels.ndjson + ch_edges.ndjson and writes:',
     '  <graphDir>/tiles/{x}_{y}.bin  - binary v2 tile (level + coreBit + viaId per edge)',

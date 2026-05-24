@@ -23,7 +23,8 @@
     "cf:migrate:remote": "wrangler d1 migrations apply rideoasis-supply-points --remote",
     "cf:migrate:local": "wrangler d1 migrations apply rideoasis-supply-points --local",
     "cf:seed:remote": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --remote",
-    "cf:seed:local": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --local"
+    "cf:seed:local": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --local",
+    "cycling:ch-tile-split": "node --max-old-space-size=12288 scripts/cycling_ch_tile_split.js"
   },
   "engines": {
     "node": ">=22.5.0",
