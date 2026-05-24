@@ -92,7 +92,12 @@ async function withEdgeCache(request, ttlSeconds, build) {
     console.warn('edge cache match failed', err);
   }
   const fresh = await build();
-  if (fresh.ok && request.method === 'GET') {
+  // build() 側が cache-control: no-store を立てたレスポンス (部分失敗等で
+  // キャッシュさせたくない 200) は edge cache に載せない。withEdgeCache は
+  // ttl を上書きしていたが、no-store を尊重するよう変更。
+  const requestedCacheControl = fresh.headers.get('cache-control') || '';
+  const optOut = /no-store|no-cache|private/i.test(requestedCacheControl);
+  if (fresh.ok && request.method === 'GET' && !optOut) {
     try {
       const cacheable = new Response(fresh.clone().body, fresh);
       cacheable.headers.set('cache-control', `public, max-age=${ttlSeconds}`);
@@ -192,6 +197,16 @@ function parsePositiveNumber(raw, fallback, max) {
   return Math.min(v, max);
 }
 
+// tolerance_m=0 は「simplify を無効化する」契約 (douglasPeucker 仕様)。
+// parsePositiveNumber は 0 を fallback に化けさせるため、専用の
+// non-negative パーサで 0 を許可する。負値・NaN は fallback に倒す。
+function parseNonNegativeNumber(raw, fallback, max) {
+  if (raw == null || raw === '') return fallback;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v < 0) return fallback;
+  return Math.min(v, max);
+}
+
 async function handleDnfPack(url, env) {
   const from = parseLonLat(url.searchParams.get('from'));
   const to = parseLonLat(url.searchParams.get('to'));
@@ -202,7 +217,8 @@ async function handleDnfPack(url, env) {
     );
   }
   const bufferM = parsePositiveNumber(url.searchParams.get('buffer_m'), DNF_DEFAULT_BUFFER_M, DNF_MAX_BUFFER_M);
-  const toleranceM = parsePositiveNumber(url.searchParams.get('tolerance_m'), DNF_DEFAULT_TOLERANCE_M, DNF_MAX_TOLERANCE_M);
+  // tolerance_m=0 は simplify off の契約として明示的に受け入れる。
+  const toleranceM = parseNonNegativeNumber(url.searchParams.get('tolerance_m'), DNF_DEFAULT_TOLERANCE_M, DNF_MAX_TOLERANCE_M);
   const limit = parsePositiveNumber(url.searchParams.get('limit'), DNF_DEFAULT_LIMIT, DNF_MAX_LIMIT);
 
   let loader;
@@ -287,7 +303,13 @@ async function handleDnfPack(url, env) {
     {
       headers: {
         'content-type': 'application/json; charset=utf-8',
-        'cache-control': `public, max-age=${DNF_PACK_CACHE_TTL_S}`
+        // supply-points 取得が失敗した部分応答 (D1 障害など) は edge cache
+        // に固定すると短期障害でも「空の supply_points で route だけ返す
+        // 200」が 5 分間配信され続けるので、no-store で原則 origin に戻す。
+        // 正常応答は通常通り 5 分キャッシュ。
+        'cache-control': supplyError
+          ? 'no-store'
+          : `public, max-age=${DNF_PACK_CACHE_TTL_S}`
       }
     }
   );

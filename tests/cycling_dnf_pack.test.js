@@ -65,6 +65,13 @@ test('douglasPeucker: tolerance 0 は原配列を返す (no-op)', () => {
   assert.equal(douglasPeucker(c, 0), c);
 });
 
+test('douglasPeucker: no-op 経路は入力参照そのものを返す (mutate 注意の根拠)', () => {
+  // docstring の「呼び出し側が結果を mutate するなら slice() で複製を」の
+  // 契約を担保するため、参照同一性を assert.strictEqual で確認する。
+  const c = [[0, 0], [1, 1]];
+  assert.strictEqual(douglasPeucker(c, 5), c);
+});
+
 test('routeBBoxWithBuffer: 単一点 + buffer で正方形 bbox', () => {
   const bbox = routeBBoxWithBuffer([[135.0, 35.0]], 1000);
   assert.ok(bbox.minLng < 135.0 && bbox.maxLng > 135.0);
