@@ -1873,12 +1873,57 @@ async function handleRwgFetch(event) {
   }
 }
 
+// Worker edge cache に加えて、ブラウザ再訪問でも同 from/to 組合せが即時返却
+// されるよう localStorage に結果を寄せておく。座標は ~10m grid に量子化して
+// キーを安定化させ、同タップ箇所での re-fetch を防ぐ。
+const ROUTE_CACHE_PREFIX = 'rideoasis.route.v1.';
+const ROUTE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const ROUTE_COORD_GRID = 0.0001;
+
+function routeCacheKey(from, to) {
+  const qz = (v) => Math.round(v / ROUTE_COORD_GRID) * ROUTE_COORD_GRID;
+  return `${ROUTE_CACHE_PREFIX}${qz(from[0]).toFixed(4)},${qz(from[1]).toFixed(4)}|${qz(to[0]).toFixed(4)},${qz(to[1]).toFixed(4)}`;
+}
+
+function readRouteCache(from, to) {
+  const key = routeCacheKey(from, to);
+  try {
+    const raw = window.localStorage?.getItem(key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || typeof obj.ts !== 'number' || Date.now() - obj.ts > ROUTE_CACHE_TTL_MS) {
+      // 期限切れエントリは読取時に削除して localStorage 容量を圧迫しない
+      try { window.localStorage?.removeItem(key); } catch (_) { /* ignore */ }
+      return null;
+    }
+    return obj.payload || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeRouteCache(from, to, payload) {
+  try {
+    const key = routeCacheKey(from, to);
+    window.localStorage?.setItem(key, JSON.stringify({ ts: Date.now(), payload }));
+  } catch (_) {
+    // QuotaExceeded などは無視 (キャッシュは best-effort)
+  }
+}
+
 /**
  * Calls /api/route. Returns { coordinates } on success, { error, ...meta } when
  * the worker rejects the request with a known reason (e.g. too_far), or null on
  * unknown failures so the caller falls back to a straight line silently.
+ *
+ * Successful results are kept in localStorage for 1 day to skip the network
+ * round-trip on re-visits with (near-)identical click coordinates.
  */
 async function fetchCyclingRoute(from, to, loadToken) {
+  const cached = readRouteCache(from, to);
+  if (cached && Array.isArray(cached.coordinates) && cached.coordinates.length >= 2) {
+    return cached;
+  }
   const qs = new URLSearchParams({
     from: `${from[0]},${from[1]}`,
     to: `${to[0]},${to[1]}`
@@ -1902,7 +1947,9 @@ async function fetchCyclingRoute(from, to, loadToken) {
       ? json.geometry.coordinates
       : null;
     if (!coords || coords.length < 2) return null;
-    return { coordinates: coords };
+    const payload = { coordinates: coords };
+    writeRouteCache(from, to, payload);
+    return payload;
   } catch (_err) {
     return null;
   }
