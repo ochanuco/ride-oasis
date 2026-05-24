@@ -170,8 +170,20 @@ test('v2: level 上限 0x7FFFFFFF を超えると例外 (将来用ガード)', (
   const tooLarge = LEVEL_MAX_V2 + 1;
   assert.throws(
     () => encodeTileV2([{ id: 1, lon: 0, lat: 0, level: tooLarge, core: 0 }], []),
-    /exceeds LEVEL_MAX_V2/
+    /level must be integer/
   );
+});
+
+test('v2: level=undefined / NaN / 小数 / 負数も明示的に例外 (暗黙変換しない)', () => {
+  // フォーマット境界での fail-fast を担保。`>>> 0` の暗黙変換だと
+  // undefined/NaN は 0 に化け、小数は切り捨てられて気付かないため。
+  for (const bad of [undefined, NaN, 3.5, -1]) {
+    assert.throws(
+      () => encodeTileV2([{ id: 1, lon: 0, lat: 0, level: bad, core: 0 }], []),
+      /level must be integer/,
+      `expected throw for level=${String(bad)}`
+    );
+  }
 });
 
 test('v2 サイズは v1 比 ~40% 増 (level + viaId 分)', () => {
