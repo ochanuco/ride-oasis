@@ -147,6 +147,33 @@ test('v1 decode は level=0 / viaId=0 を補完して返す (v2 と同一形状)
   assert.equal(r.edges[0].viaId, 0);
 });
 
+test('v2: core=1 ノードは round-trip で core=1 を保持', () => {
+  const nodes = [
+    { id: 1, lon: 135, lat: 34, level: 10, core: 0 },
+    { id: 2, lon: 135.01, lat: 34, level: 20, core: 1 }
+  ];
+  const r = decodeTile(encodeTileV2(nodes, []));
+  assert.equal(r.nodes[0].level, 10);
+  assert.equal(r.nodes[0].core, 0);
+  assert.equal(r.nodes[1].level, 20);
+  assert.equal(r.nodes[1].core, 1);
+});
+
+test('v2: core 省略は core=0 として encode/decode される (旧 ndjson 互換)', () => {
+  const nodes = [{ id: 1, lon: 135, lat: 34, level: 0 }];
+  const r = decodeTile(encodeTileV2(nodes, []));
+  assert.equal(r.nodes[0].core, 0);
+});
+
+test('v2: level 上限 0x7FFFFFFF を超えると例外 (将来用ガード)', () => {
+  const { LEVEL_MAX_V2 } = require('../lib/cycling/tile_binary');
+  const tooLarge = LEVEL_MAX_V2 + 1;
+  assert.throws(
+    () => encodeTileV2([{ id: 1, lon: 0, lat: 0, level: tooLarge, core: 0 }], []),
+    /exceeds LEVEL_MAX_V2/
+  );
+});
+
 test('v2 サイズは v1 比 ~40% 増 (level + viaId 分)', () => {
   const nodes = Array.from({ length: 100 }, (_, i) => ({
     id: i, lon: 135 + i * 0.001, lat: 34, level: i % 16
