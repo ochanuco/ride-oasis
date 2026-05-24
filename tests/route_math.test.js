@@ -287,6 +287,16 @@ test('Route Math: quantizeBbox(null) は null', () => {
   assert.equal(quantizeBbox(null, 0.01), null);
 });
 
+test('Route Math: quantizeBbox は不正形状を null で弾く', () => {
+  // 長さ不正
+  assert.equal(quantizeBbox([135, 34, 136], 0.01), null);
+  // NaN 含む
+  assert.equal(quantizeBbox([135, NaN, 136, 35], 0.01), null);
+  // min>max 逆転
+  assert.equal(quantizeBbox([136, 34, 135, 35], 0.01), null);
+  assert.equal(quantizeBbox([135, 35, 136, 34], 0.01), null);
+});
+
 test('Route Math: 隣接の似たエリアは quantize 後に同じ bbox になる (cache hit 期待)', () => {
   // 同じ ~1km セル内の 2 つの異なる詳細 bbox は同じ量子化結果を返す
   const a = quantizeBbox([135.502, 34.693, 135.504, 34.695], 0.01);

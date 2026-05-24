@@ -1,11 +1,13 @@
 # mise: dev tool versions for ride-oasis
 #
-# - node 22: matches CI (.github/workflows/unit-tests.yml runs on 22 + 24).
-#   wrangler / @geolonia deps support both; we pin LTS for reproducibility.
-# - rust stable: used by the experimental rust-wasm/ cycling router PoC.
-# - wasm-pack: builds the rust crate to wasm32 for browser/Worker bundling.
+# 再現性のため "stable" / "latest" のチャンネル指定ではなく
+# 固定バージョンで pin する (CodeRabbit 指摘 #64)。
+#
+# - node 22.22.3: CI matrix の Node 22 系最新 (要件 >=22.5.0)
+# - rust 1.94.1:  rust-router/ の wasm32 ビルドに使用
+# - wasm-pack 0.15.0: 同上
 
 [tools]
-node = "22"
-rust = "stable"
-"cargo:wasm-pack" = "latest"
+node = "22.22.3"
+rust = "1.94.1"
+"cargo:wasm-pack" = "0.15.0"

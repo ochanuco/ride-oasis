@@ -117,7 +117,17 @@
    * routes within the same area, at the cost of a small over-fetch.
    */
   function quantizeBbox(bbox, gridDeg) {
-    if (!bbox) return null;
+    if (
+      !Array.isArray(bbox) ||
+      bbox.length !== 4 ||
+      !bbox.every(Number.isFinite) ||
+      bbox[0] > bbox[2] ||
+      bbox[1] > bbox[3]
+    ) {
+      // 不正形状 (長さ不正 / NaN / min>max) を null で弾き、不正な
+      // URL クエリの組み立てを防ぐ。
+      return null;
+    }
     const step = Number.isFinite(gridDeg) && gridDeg > 0 ? gridDeg : 0.01;
     return [
       Math.floor(bbox[0] / step) * step,
