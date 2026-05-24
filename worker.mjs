@@ -55,16 +55,11 @@ function ensureTileLoader(env) {
   // R2 origin の往復 (~100ms) を edge cache (caches.default) でスキップする。
   // 同じタイルは isolate を跨いで使い回せるので route の cold start が大幅短縮。
   tileLoaderCache = new TileLoader(
-    // PR #81: Phase 1 (shortcut typed flat) + maxTiles=16 + loadConcurrency=2。
-    // maxTiles=32 では複数 corridor 分の view が累積し 128MB を超過した。
-    // maxTiles=16 (= 3km corridor 1 つ分ぴったり) なら新 corridor が来ると
-    // 即 _reset → view 再構築となり、memory footprint が累積しない。
-    // 副作用: route ごとに R2 fetch 16 タイル + decode が走る (~400-600ms
-    // cold) が、edge cache でほぼ吸収できる想定。warm-up なしでも安定。
-    // loadConcurrency=2 で並列 decode 中の transient memory spike を抑制。
-    // cache v9 → v10.
-    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v10'),
-    { enableCh: true, maxTiles: 16, loadConcurrency: 2 }
+    // PR #81 (Phase 1.5 maxTiles=16) も exceededMemory が再発。snap の
+    // loadMany が corridor の上に追加 9 タイル乗せて 16 を超えてしまう
+    // ことや、JS object 表現自体が密度高すぎる可能性。CSR refactor までは
+    // CH を諦めて NBA* で安定動作する。cache v11。
+    makeR2Fetcher(env.GRAPH, 'tiles/', caches.default, 'v11')
   );
   return tileLoaderCache;
 }
