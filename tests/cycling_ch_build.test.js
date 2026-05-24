@@ -25,7 +25,7 @@ test('parseArgs: 未知引数は例外', () => {
   assert.throws(() => parseArgs(['--bad']), /Unknown argument/);
 });
 
-test('loadEdges: NDJSON を配列にパース', () => {
+test('loadEdges: NDJSON を streaming で配列化', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-build-'));
   try {
     fs.writeFileSync(
@@ -35,7 +35,7 @@ test('loadEdges: NDJSON を配列にパース', () => {
         JSON.stringify({ from: 2, to: 3, cost_m: 50, oneway: true })
       ].join('\n') + '\n'
     );
-    const edges = loadEdges(path.join(dir, 'edges.ndjson'));
+    const edges = await loadEdges(path.join(dir, 'edges.ndjson'));
     assert.equal(edges.length, 2);
     assert.equal(edges[0].from, 1);
     assert.equal(edges[1].oneway, true);
