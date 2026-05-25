@@ -5,6 +5,10 @@
 // d.ts も strict union 型へ patch する。
 //
 // `npm run wasm:build` の最後で実行され、再生成された d.ts を上書きする。
+//
+// 冪等性は **marker comment ベース** で判定する (CodeRabbit PR #88 指摘)。
+// 文字列全体比較だと wasm-pack が空白やコメント順を変えるたびに上書き発火
+// してしまうため、PATCH_MARKER の有無だけ確認する。
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -13,7 +17,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dtsPath = resolve(__dirname, '..', 'rust-router', 'pkg', 'rust_router.d.ts');
 
-const PATCHED = `/* tslint:disable */
+const PATCH_MARKER = '/* AUTO-PATCHED-BY: scripts/patch_wasm_dts.mjs */';
+
+const PATCHED = `${PATCH_MARKER}
+/* tslint:disable */
 /* eslint-disable */
 
 /*
@@ -24,7 +31,7 @@ const PATCHED = `/* tslint:disable */
  *
  * このファイルは wasm-pack が再生成すると元の \`any\` シグネチャに戻るため、
  * \`npm run wasm:build\` の post-build (scripts/patch_wasm_dts.mjs) で
- * 自動的に再 patch される。
+ * 自動的に再 patch される。冪等性は先頭の PATCH_MARKER コメントで判定。
  */
 
 import type { RouteChResult } from './rust_router_worker';
@@ -49,10 +56,23 @@ export function route_ch(
 ): RouteChResult;
 `;
 
-const current = readFileSync(dtsPath, 'utf8');
-if (current === PATCHED) {
-  console.log('[patch_wasm_dts] already patched');
-} else {
-  writeFileSync(dtsPath, PATCHED);
-  console.log(`[patch_wasm_dts] patched ${dtsPath}`);
+let current;
+try {
+  current = readFileSync(dtsPath, 'utf8');
+} catch (err) {
+  console.error(`[patch_wasm_dts] Failed to read ${dtsPath}:`, err.message);
+  process.exit(1);
 }
+
+if (current.startsWith(PATCH_MARKER)) {
+  console.log('[patch_wasm_dts] already patched (marker present); skip');
+  process.exit(0);
+}
+
+try {
+  writeFileSync(dtsPath, PATCHED);
+} catch (err) {
+  console.error(`[patch_wasm_dts] Failed to write ${dtsPath}:`, err.message);
+  process.exit(1);
+}
+console.log(`[patch_wasm_dts] patched ${dtsPath}`);
