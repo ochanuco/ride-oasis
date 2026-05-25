@@ -247,7 +247,12 @@ async function tryWasmRoute(loader, from, to) {
       coordinates: r.coords  // [[lon, lat], ...]
     };
   } catch (err) {
-    try { console.warn('wasm route failed, falling back to JS', err); } catch (_) {}
+    try {
+      console.warn(JSON.stringify({
+        evt: 'wasm_error',
+        message: err?.message || String(err)
+      }));
+    } catch (_) {}
     return null;
   }
 }
