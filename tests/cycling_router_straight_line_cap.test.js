@@ -23,8 +23,11 @@ test('straightLineMeters: 同一点は 0', () => {
   assert.equal(straightLineMeters(135.5, 34.7, 135.5, 34.7), 0);
 });
 
-test('MAX_STRAIGHT_LINE_METERS は 18km (NBA* 実測 CPU 上限)', () => {
-  assert.equal(MAX_STRAIGHT_LINE_METERS, 18000);
+test('MAX_STRAIGHT_LINE_METERS は 25km (WASM CSR で memory 内に収まる上限)', () => {
+  // 旧 18km は NBA* 実測 CPU 上限の名残り。WASM CSR mode 移行後は memory
+  // が主因のボトルネックになり、25km が corridor ~35 tiles で 128MB 内。
+  // 25km 超は frontend 側で midpoint 分割 (灰色直線 + waypoint 挿入) で対応。
+  assert.equal(MAX_STRAIGHT_LINE_METERS, 25000);
 });
 
 test('TiledRouter: 閾値超なら too_far を即返し、tile load しない', async () => {
@@ -34,11 +37,11 @@ test('TiledRouter: 閾値超なら too_far を即返し、tile load しない', 
     return null;
   });
   const router = new TiledRouter(loader);
-  // 大阪駅 → 京都駅 (~40km) は cap 18km 超
+  // 大阪駅 → 京都駅 (~40km) は cap 25km 超
   const r = await router.route(135.4959, 34.7026, 135.7585, 34.9858);
   assert.equal(r.error, 'too_far');
   assert.ok(r.straight_line_m > 35000);
-  assert.equal(r.max_straight_line_m, 18000);
+  assert.equal(r.max_straight_line_m, 25000);
   assert.equal(fetcherCalls, 0);
 });
 
