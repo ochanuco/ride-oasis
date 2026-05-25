@@ -2,6 +2,10 @@
 // the default export gives us the entire `module.exports` object, then we
 // destructure the helpers we need. Going through the default import is the
 // most portable way to consume CJS from ESM under Workers' bundler.
+//
+// Note: route_distances を frontend WASM 化した PR #89 で worker.mjs を
+// 触っていないと Workers Builds が trigger しない (path filter)。コメント
+// だけの no-op edit で preview URL を生成させる。
 import mapData from './lib/map_data.js';
 import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
