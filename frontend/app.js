@@ -2814,28 +2814,47 @@ function bindEvents() {
     }
   });
 
-  // waypoint drag = ol.interaction.Modify を endpointSource に。
-  // modifyend で隣接 segments を再計算。manual モード時のみアクティブに
-  // するため、selectedSourceMode 切替時に setActive で on/off (簡素化:
-  // 常時アクティブ、kind 判定で manual mode の waypoint のみ処理する)。
-  const modifyInteraction = new ol.interaction.Modify({
-    source: endpointSource,
-    // dblclick での削除と競合しないよう、condition でクリックを単一化
-    condition: ol.events.condition.primaryAction
+  // waypoint drag = ol.interaction.Translate (Modify より drag に向く;
+  // Modify は grab tolerance 10px で掴みづらい / vertex 追加 mode と
+  // 競合する。Translate は feature 単位の自由移動)。
+  // - filter: manual mode の start/goal/intermediate のみ
+  // - translateend で 1 回 (drag 中 every frame ではない) → 隣接 segment 再計算
+  // - hover で cursor 'move' に変更 (掴めることを可視化)
+  const translateInteraction = new ol.interaction.Translate({
+    layers: [endpointLayer],
+    filter: (feature) => {
+      if (selectedSourceMode() !== 'manual') return false;
+      const k = feature.get('kind');
+      return k === 'start' || k === 'goal' || k === 'intermediate';
+    }
   });
-  modifyInteraction.on('modifyend', (ev) => {
+  translateInteraction.on('translateend', (ev) => {
     if (selectedSourceMode() !== 'manual') return;
     ev.features.forEach((feature) => {
-      const kind = feature.get('kind');
       const idx = feature.get('waypointIndex');
-      if (kind !== 'start' && kind !== 'goal' && kind !== 'intermediate') return;
       if (!Number.isInteger(idx)) return;
       const coord3857 = feature.getGeometry().getCoordinates();
       const lonLat = ol.proj.toLonLat(coord3857);
       handleManualWaypointDragEnd(idx, lonLat);
     });
   });
-  map.addInteraction(modifyInteraction);
+  map.addInteraction(translateInteraction);
+
+  // hover で cursor 'move' に。Translate interaction は標準で 'grab/grabbing'
+  // を出さないため自前で waypoint hover を検知して切替。
+  const mapTarget = map.getTargetElement();
+  map.on('pointermove', (event) => {
+    if (event.dragging) return;
+    if (selectedSourceMode() !== 'manual') {
+      mapTarget.style.cursor = '';
+      return;
+    }
+    const hit = map.forEachFeatureAtPixel(event.pixel, (candidate) => {
+      const k = candidate.get('kind');
+      return (k === 'start' || k === 'goal' || k === 'intermediate') ? candidate : undefined;
+    });
+    mapTarget.style.cursor = hit ? 'move' : '';
+  });
 
   // waypoint dblclick で削除 (端点でなければ)。中間点を削除すると左右の
   // segment が結合され、25km 超ならまた灰色に戻る。
