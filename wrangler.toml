@@ -25,6 +25,15 @@ directory = "frontend"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
+# Rust WASM router (rust-router/pkg/rust_router_bg.wasm).
+# Workers Builds (Cloudflare's CI) requires `[[rules]]` to bundle .wasm files
+# imported by JS as CompiledWasm modules. ローカル wrangler dev/deploy では
+# 暗黙に動くが、Workers Builds の bundler は明示が必要。
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
+fallthrough = true
+
 # Production D1 binding. Run `wrangler d1 create rideoasis-supply-points` once
 # and paste the returned database_id below before the first deploy. Local
 # `wrangler dev --local` uses an in-memory copy.
