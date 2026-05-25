@@ -9,6 +9,12 @@
 
 import init, { route_distances } from './wasm/rust_router.js';
 
+// Race condition 回避: app.js が早期実行された場合に WASM 準備完了を待てるよう Promise を公開。
+let resolveWasmReady;
+window.RouterWasmReady = new Promise((resolve) => {
+  resolveWasmReady = resolve;
+});
+
 (async () => {
   try {
     // wasm-pack web target は default export が init(url) を取る。同 dir の
@@ -25,7 +31,9 @@ import init, { route_distances } from './wasm/rust_router.js';
     };
     // 観測用: console に WASM 利用可能をログ
     console.log('[RouterWasm] ready');
+    resolveWasmReady(true);
   } catch (err) {
     console.warn('[RouterWasm] init failed, falling back to JS:', err);
+    resolveWasmReady(false);
   }
 })();

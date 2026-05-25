@@ -215,6 +215,9 @@ let currentRwgId = null;
 let pendingCptypesFilter = null;
 let allMatchedPoints = [];
 let filteredPoints = [];
+let lastCandidates = null;
+let lastRouteSnapshot = null;
+let wasmReadyHandlerInstalled = false;
 let activeSupplyPointId = null;
 let activePopupKind = null;
 let activeCoursePointType = null;
@@ -293,6 +296,8 @@ function syncSourceModeUi() {
 function resetResults() {
   allMatchedPoints = [];
   filteredPoints = [];
+  lastCandidates = null;
+  lastRouteSnapshot = null;
   featureIndex.clear();
   pointSource.clear();
   buildPointList([]);
@@ -1848,8 +1853,36 @@ async function refreshMap(routeSnapshot = [...routeCoordinates]) {
   try {
     const candidates = await fetchCandidatePoints(routeSnapshot, distanceMeters);
     if (refreshToken !== latestRefreshToken) return;
+
+    // Race condition 回避: WASM が後から準備完了した場合に再フィルタできるよう保存。
+    lastCandidates = candidates;
+    lastRouteSnapshot = routeSnapshot;
+
     allMatchedPoints = filterMatchedPoints(candidates, routeSnapshot, distanceMeters);
     if (refreshToken !== latestRefreshToken) return;
+
+    // WASM が使用されなかった場合、準備完了時に再フィルタするハンドラを一度だけ登録。
+    if (
+      !wasmReadyHandlerInstalled &&
+      routeSnapshot.length >= 2 &&
+      window.RouterWasmReady &&
+      !window.RouterWasm
+    ) {
+      wasmReadyHandlerInstalled = true;
+      window.RouterWasmReady.then((wasmAvailable) => {
+        if (!wasmAvailable || !window.RouterWasm) return;
+        // WASM が利用可能になったので、最新の candidates を WASM で再フィルタ。
+        if (lastCandidates && lastRouteSnapshot && lastRouteSnapshot.length >= 2) {
+          console.log('[RouterWasm] re-filtering with WASM after late initialization');
+          const distanceMeters = selectedDistanceMeters();
+          allMatchedPoints = filterMatchedPoints(lastCandidates, lastRouteSnapshot, distanceMeters);
+          applyResultFilters();
+        }
+      }).catch((err) => {
+        console.warn('[RouterWasm] readiness check failed:', err);
+      });
+    }
+
     applyResultFilters();
   } catch (error) {
     if (refreshToken !== latestRefreshToken) return;
