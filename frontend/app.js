@@ -1675,10 +1675,54 @@ async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
   };
 }
 
-/** Applies the browser-side point-to-route distance filter. */
+/** Applies the browser-side point-to-route distance filter.
+ *
+ * 高速化: window.RouterWasm.routeDistances が ready なら Rust WASM で
+ * batch 計算 (5-10x 速い)。failed/older browser では従来の JS loop に
+ * フォールバック。
+ */
 function filterMatchedPoints(featureCollection, routeSnapshot, distanceMeters) {
+  const features = featureCollection.features;
   const origin = routeSnapshot[0] || null;
-  return featureCollection.features
+
+  // WASM fast path: 全 shop の距離を 1 回の WASM 呼び出しで batch 計算
+  if (
+    features.length > 0 &&
+    routeSnapshot.length >= 2 &&
+    window.RouterWasm && window.RouterWasm.routeDistances
+  ) {
+    // flatten route: [[lon, lat], ...] → Float64Array [lon0, lat0, lon1, lat1, ...]
+    const routeFlat = new Float64Array(routeSnapshot.length * 2);
+    for (let i = 0; i < routeSnapshot.length; i += 1) {
+      routeFlat[i * 2] = routeSnapshot[i][0];
+      routeFlat[i * 2 + 1] = routeSnapshot[i][1];
+    }
+    const shopFlat = new Float64Array(features.length * 2);
+    for (let i = 0; i < features.length; i += 1) {
+      const c = features[i].geometry.coordinates;
+      shopFlat[i * 2] = c[0];
+      shopFlat[i * 2 + 1] = c[1];
+    }
+    const dists = window.RouterWasm.routeDistances(routeFlat, shopFlat);
+    const out = [];
+    for (let i = 0; i < features.length; i += 1) {
+      const d = dists[i];
+      if (d <= distanceMeters) {
+        out.push({
+          ...features[i],
+          properties: {
+            ...features[i].properties,
+            route_distance_m: d
+          }
+        });
+      }
+    }
+    out.sort((a, b) => a.properties.route_distance_m - b.properties.route_distance_m);
+    return out;
+  }
+
+  // JS fallback (routeSnapshot 1 点 or WASM 未初期化)
+  return features
     .map((feature) => {
       const distance = routeSnapshot.length >= 2
         ? window.RouteMath.pointToRouteDistanceMeters(feature.geometry.coordinates, routeSnapshot)

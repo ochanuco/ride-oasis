@@ -25,7 +25,7 @@
     "cf:seed:remote": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --remote",
     "cf:seed:local": "wrangler d1 execute rideoasis-supply-points --file=cloudflare/seed.sql --local",
     "cycling:ch-tile-split": "node --max-old-space-size=12288 scripts/cycling_ch_tile_split.js",
-    "wasm:build": "wasm-pack build rust-router --release --target bundler --out-dir pkg && wasm-pack build rust-router --release --target nodejs --out-dir pkg-node && node scripts/patch_wasm_dts.mjs"
+    "wasm:build": "wasm-pack build rust-router --release --target bundler --out-dir pkg && wasm-pack build rust-router --release --target nodejs --out-dir pkg-node && wasm-pack build rust-router --release --target web --out-dir pkg-web && node scripts/patch_wasm_dts.mjs && cp -r rust-router/pkg-web frontend/wasm"
   },
   "engines": {
     "node": ">=22.5.0",
