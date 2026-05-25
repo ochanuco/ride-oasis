@@ -1635,9 +1635,38 @@ function expandedBboxForQuery(routeSnapshot, distanceMeters) {
   return window.RouteMath.quantizeBbox(padded, SUPPLY_POINTS_BBOX_GRID_DEG);
 }
 
+// ルートを query param に乗せる時の Douglas-Peucker 許容ズレ (m)。
+// 100m なら ブルベ規模の 5000 vertices route が ~200-500 vertex に圧縮
+// (約 22B/vertex × 500 = 11KB → 大半は URL 8KB 制限超なので server 側で
+// 拒否されたら client filter にフォールバック)。
+const ROUTE_PARAM_SIMPLIFY_M = 100;
+// Server side のリクエスト URL 上限 (8KB) を超えそうな場合は route 送信を
+// 諦めて bbox-only にフォールバック。安全マージンで 7000B。
+const ROUTE_PARAM_MAX_BYTES = 7000;
+
+/**
+ * 送信用 route param 文字列を作る。ルートが大きすぎる場合は null を返して
+ * route param を付けない (bbox-only フォールバック)。
+ */
+function buildRouteQueryParam(routeSnapshot) {
+  if (!Array.isArray(routeSnapshot) || routeSnapshot.length < 2) return null;
+  const simplified = window.RouteMath.simplifyDouglasPeucker(
+    routeSnapshot,
+    ROUTE_PARAM_SIMPLIFY_M
+  );
+  // lon,lat;lon,lat;... 形式。小数 6 桁 (約 0.1m 精度) で encode。
+  const parts = simplified.map(([lon, lat]) => `${lon.toFixed(6)},${lat.toFixed(6)}`);
+  const joined = parts.join(';');
+  if (joined.length > ROUTE_PARAM_MAX_BYTES) return null;
+  return joined;
+}
+
 /** Loads candidate supply points from the local API for the current filters. */
 async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
   const bbox = expandedBboxForQuery(routeSnapshot, distanceMeters);
+  // server side で route filter してくれるなら client は受信量が激減する。
+  // route param が大きすぎて URL 上限を超えそうなら null = bbox-only に。
+  const routeParam = buildRouteQueryParam(routeSnapshot);
   const features = [];
   const seenIds = new Set();
   let offset = 0;
@@ -1646,6 +1675,14 @@ async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
     const params = new URLSearchParams();
     if (bbox) {
       params.set('bbox', bbox.join(','));
+    }
+    if (routeParam) {
+      params.set('route', routeParam);
+      // 初回は wide threshold (3000m か user 設定値) で server filter。
+      // slider 操作で更に絞る時は client WASM 側で route_distance_m 再 filter
+      // するので、ここでは生成的に粗く取って渡す。
+      const initialThreshold = Math.max(distanceMeters, 1000);
+      params.set('route_distance_m', String(Math.ceil(initialThreshold)));
     }
     params.set('min_point_level', String(DEFAULT_MIN_POINT_LEVEL));
     params.set('limit', String(API_PAGE_LIMIT));

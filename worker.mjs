@@ -16,7 +16,7 @@ import dnfPackModule from './lib/cycling/dnf_pack.js';
 // `[[rules]] CompiledWasm` 経由で WebAssembly.Module を受け取り Instance 化
 // する手書き wrapper。route_ch(buffers, fromLon, fromLat, toLon, toLat,
 // maxSnapM) → { distance, coords, ... } を返す同期関数。
-import { route_ch as wasmRouteCh } from './rust-router/pkg/rust_router_worker.js';
+import { route_ch as wasmRouteCh, route_distances as wasmRouteDistances } from './rust-router/pkg/rust_router_worker.js';
 
 const {
   parseSupplyPointFilters,
@@ -449,13 +449,90 @@ async function handleDnfPack(url, env) {
   );
 }
 
-/** Returns the GeoJSON FeatureCollection for the requested supply-points filter. */
+// Route param 上限: GET URL に safe に乗る範囲。Cloudflare Workers の
+// request URL 上限は 8KB なので、route として 7KB まで許可 (1 vertex ~22B
+// = 約 300 vertices に decimate されている前提)。
+const MAX_ROUTE_PARAM_BYTES = 7 * 1024;
+const MAX_ROUTE_FILTER_DISTANCE_M = 5000;
+
+/**
+ * Parses ?route=lon1,lat1;lon2,lat2;... into a flat Float64Array [lon0,lat0,
+ * lon1,lat1,...] suitable for wasm route_distances. Returns null on invalid
+ * input. 上限超 / parse 失敗時は null (caller は filter skip)。
+ */
+function parseRouteParam(raw) {
+  if (!raw) return null;
+  if (raw.length > MAX_ROUTE_PARAM_BYTES) return null;
+  const pairs = raw.split(';');
+  if (pairs.length < 2) return null;
+  const flat = new Float64Array(pairs.length * 2);
+  for (let i = 0; i < pairs.length; i += 1) {
+    const ll = pairs[i].split(',');
+    if (ll.length !== 2) return null;
+    const lon = Number(ll[0]);
+    const lat = Number(ll[1]);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    if (lon < -180 || lon > 180 || lat < -90 || lat > 90) return null;
+    flat[i * 2] = lon;
+    flat[i * 2 + 1] = lat;
+  }
+  return flat;
+}
+
+/** Returns the GeoJSON FeatureCollection for the requested supply-points filter.
+ *
+ * 拡張 (route filter): ?route=lon,lat;lon,lat;...&route_distance_m=3000 を
+ * 渡すと、bbox D1 query の結果を更に WASM route_distances で「ルートから
+ * N m 以内」に絞って返す。ブルベ規模で download 量を 5-10x 削減。
+ * route がデカすぎ/不正なら bbox-only にフォールバック (silent)。
+ */
 async function handleSupplyPoints(url, env) {
   const filters = parseSupplyPointFilters(url.searchParams);
   const { sql, params } = buildSupplyPointsQuery(filters);
   const stmt = prepareForD1(env.DB, sql, params);
   const { results } = await stmt.all();
-  return Response.json(toFeatureCollection(results || []), {
+
+  // Optional WASM-side route filter
+  const routeRaw = url.searchParams.get('route');
+  const distanceMRaw = url.searchParams.get('route_distance_m');
+  const routeFlat = parseRouteParam(routeRaw);
+  const distanceM = distanceMRaw == null || distanceMRaw === ''
+    ? null
+    : Math.min(MAX_ROUTE_FILTER_DISTANCE_M, Math.max(0, Number(distanceMRaw)));
+  let collection;
+  if (routeFlat && Number.isFinite(distanceM) && distanceM > 0 && results && results.length > 0) {
+    const shopFlat = new Float64Array(results.length * 2);
+    for (let i = 0; i < results.length; i += 1) {
+      shopFlat[i * 2] = results[i].lng;
+      shopFlat[i * 2 + 1] = results[i].lat;
+    }
+    let kept = results;
+    try {
+      const dists = wasmRouteDistances(routeFlat, shopFlat);
+      const out = [];
+      for (let i = 0; i < results.length; i += 1) {
+        const d = dists[i];
+        if (d <= distanceM) {
+          // 各 row に route_distance_m を埋め込んで返す (client が再 fetch
+          // せず slider で絞れるよう meta を渡す)
+          out.push({ ...results[i], route_distance_m: d });
+        }
+      }
+      kept = out;
+    } catch (err) {
+      console.warn('route filter WASM failed; falling back to bbox-only', err);
+    }
+    collection = toFeatureCollection(kept);
+    // toFeatureCollection は route_distance_m を落とすので注入し直す
+    if (kept !== results) {
+      for (let i = 0; i < kept.length; i += 1) {
+        collection.features[i].properties.route_distance_m = kept[i].route_distance_m;
+      }
+    }
+  } else {
+    collection = toFeatureCollection(results || []);
+  }
+  return Response.json(collection, {
     headers: {
       'content-type': 'application/geo+json; charset=utf-8',
       'cache-control': 'public, max-age=60'
