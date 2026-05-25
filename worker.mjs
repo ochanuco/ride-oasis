@@ -211,7 +211,9 @@ async function tryWasmRoute(loader, from, to) {
     // Rust 側は Uint8Array の配列を受け取る。ArrayBuffer は wrap し直す。
     const u8Bufs = tileBufs.map((t) => new Uint8Array(t.buf));
     const r = wasmRouteCh(u8Bufs, from[0], from[1], to[0], to[1], 500);
-    if (!r) return { error: 'wasm_returned_null' };
+    // null は JS CSR-only fallback に逃がす (handleRoute は { error } を
+    // 4xx/5xx に変換するため、null をそのまま返さないと fallback が効かない)。
+    if (!r) return null;
     if (r.error) {
       return { error: r.error };
     }
