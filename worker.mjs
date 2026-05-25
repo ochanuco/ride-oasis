@@ -6,6 +6,13 @@ import mapData from './lib/map_data.js';
 import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
 import dnfPackModule from './lib/cycling/dnf_pack.js';
+// Rust WASM router. wasm-pack 標準の rust_router.js は `import * as wasm
+// from "./*.wasm"` の namespace-import を使い、Cloudflare Workers Builds
+// の bundler では受け付けられない。代わりに rust_router_worker.js が
+// `[[rules]] CompiledWasm` 経由で WebAssembly.Module を受け取り Instance 化
+// する手書き wrapper。route_ch(buffers, fromLon, fromLat, toLon, toLat,
+// maxSnapM) → { distance, coords, ... } を返す同期関数。
+import { route_ch as wasmRouteCh } from './rust-router/pkg/rust_router_worker.js';
 
 const {
   parseSupplyPointFilters,
@@ -144,8 +151,18 @@ async function handleRoute(url, env) {
     }
     throw err;
   }
-  const router = new TiledRouter(loader, { csrOnly: true });
-  const r = await router.route(from[0], from[1], to[0], to[1]);
+  // WASM 経路: corridor + snap tiles を R2 から取得 → Rust route_ch に投入。
+  // CSR build + snap + chQuery + shortcut 展開を WASM で実行。JS 版より
+  // 2-5x 高速 (ローカル bench で chQuery 2-6ms vs JS 17ms)。失敗時 (WASM
+  // exception や snap miss) は JS CSR-only path にフォールバック。
+  const wasmResult = await tryWasmRoute(loader, from, to);
+  let r;
+  if (wasmResult) {
+    r = wasmResult;
+  } else {
+    const router = new TiledRouter(loader, { csrOnly: true });
+    r = await router.route(from[0], from[1], to[0], to[1]);
+  }
   if (r.error) {
     const status =
       r.error === 'unreachable_in_corridor' ? 404 :
@@ -176,6 +193,108 @@ async function handleRoute(url, env) {
       }
     }
   );
+}
+
+// WASM route 試行ヘルパ。corridor + snap 範囲のタイルバッファを R2 から
+// 並列 fetch → wasmRouteCh 呼び出し → 結果を TiledRouter 互換 shape に変換。
+// 例外時は null を返して呼び出し元の JS path に fallback させる。
+async function tryWasmRoute(loader, from, to) {
+  try {
+    // tile_partition.js: corridor + neighborhood の key を計算。WASM 用に
+    // 同じロジックを inline (依存追加避ける)。0.05° grid。
+    const corridor = corridorKeysWasm(from[0], from[1], to[0], to[1], 1);
+    const snapFrom = neighborhoodKeysWasm(from[0], from[1], 1);
+    const snapTo = neighborhoodKeysWasm(to[0], to[1], 1);
+    const allKeys = Array.from(new Set([...corridor, ...snapFrom, ...snapTo]));
+    const tileBufs = await loader.loadBuffers(allKeys);
+    if (tileBufs.length === 0) return null;
+    // Rust 側は Uint8Array の配列を受け取る。ArrayBuffer は wrap し直す。
+    const u8Bufs = tileBufs.map((t) => new Uint8Array(t.buf));
+    const r = wasmRouteCh(u8Bufs, from[0], from[1], to[0], to[1], 500);
+    // null は JS CSR-only fallback に逃がす (handleRoute は { error } を
+    // 4xx/5xx に変換するため、null をそのまま返さないと fallback が効かない)。
+    if (!r) return null;
+    if (r.error) {
+      return { error: r.error };
+    }
+    // Telemetry: wrangler tail で観測。WASM 内部 timing を logs に出す。
+    try {
+      console.log(JSON.stringify({
+        evt: 'route',
+        mode: 'wasm',
+        alg: r.algorithm,
+        ch_ms: r.ch_ms,
+        fallback_ms: r.fallback_ms,
+        csr_build_ms: r.csr_build_ms,
+        csr_bytes: r.csr_bytes,
+        csr_node_count: r.csr_node_count,
+        csr_edge_count: r.csr_edge_count,
+        dist: r.distance,
+        nodes: r.node_count,
+        tiles: allKeys.length,
+        from: r.from_id,
+        to: r.to_id,
+        terminated: r.terminated
+      }));
+    } catch (_) { /* logging best-effort */ }
+    // TiledRouter 互換 shape に整形
+    return {
+      distance_cost: r.distance,
+      node_count: r.node_count,
+      settled: r.settled,
+      snap_from_m: r.snap_from_m,
+      snap_to_m: r.snap_to_m,
+      loaded_tiles: allKeys.length,
+      algorithm: r.algorithm,
+      coordinates: r.coords  // [[lon, lat], ...]
+    };
+  } catch (err) {
+    try {
+      console.warn(JSON.stringify({
+        evt: 'wasm_error',
+        message: err?.message || String(err)
+      }));
+    } catch (_) {}
+    return null;
+  }
+}
+
+// inline tile_partition (avoid extra import; same constants/logic as
+// lib/cycling/tile_partition.js)
+const TILE_DEG_WASM = 0.05;
+function tileKeyWasm(lon, lat) {
+  const x = Math.floor(lon / TILE_DEG_WASM);
+  const y = Math.floor(lat / TILE_DEG_WASM);
+  return `${x}_${y}`;
+}
+function corridorKeysWasm(fromLon, fromLat, toLon, toLat, padding) {
+  // Replicate lib/cycling/tile_partition.js corridorKeys logic.
+  const x0 = Math.floor(fromLon / TILE_DEG_WASM);
+  const y0 = Math.floor(fromLat / TILE_DEG_WASM);
+  const x1 = Math.floor(toLon / TILE_DEG_WASM);
+  const y1 = Math.floor(toLat / TILE_DEG_WASM);
+  const xMin = Math.min(x0, x1) - padding;
+  const xMax = Math.max(x0, x1) + padding;
+  const yMin = Math.min(y0, y1) - padding;
+  const yMax = Math.max(y0, y1) + padding;
+  const out = [];
+  for (let x = xMin; x <= xMax; x += 1) {
+    for (let y = yMin; y <= yMax; y += 1) {
+      out.push(`${x}_${y}`);
+    }
+  }
+  return out;
+}
+function neighborhoodKeysWasm(lon, lat, radius) {
+  const cx = Math.floor(lon / TILE_DEG_WASM);
+  const cy = Math.floor(lat / TILE_DEG_WASM);
+  const out = [];
+  for (let dx = -radius; dx <= radius; dx += 1) {
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      out.push(`${cx + dx}_${cy + dy}`);
+    }
+  }
+  return out;
 }
 
 /**
