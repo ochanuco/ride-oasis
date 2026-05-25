@@ -491,6 +491,7 @@ async function handleSupplyPoints(url, env) {
   const { sql, params } = buildSupplyPointsQuery(filters);
   const stmt = prepareForD1(env.DB, sql, params);
   const { results } = await stmt.all();
+  const rawCount = Array.isArray(results) ? results.length : 0;
 
   // Optional WASM-side route filter
   const routeRaw = url.searchParams.get('route');
@@ -500,9 +501,9 @@ async function handleSupplyPoints(url, env) {
     ? null
     : Math.min(MAX_ROUTE_FILTER_DISTANCE_M, Math.max(0, Number(distanceMRaw)));
   let collection;
-  if (routeFlat && Number.isFinite(distanceM) && distanceM > 0 && results && results.length > 0) {
-    const shopFlat = new Float64Array(results.length * 2);
-    for (let i = 0; i < results.length; i += 1) {
+  if (routeFlat && Number.isFinite(distanceM) && distanceM > 0 && rawCount > 0) {
+    const shopFlat = new Float64Array(rawCount * 2);
+    for (let i = 0; i < rawCount; i += 1) {
       shopFlat[i * 2] = results[i].lng;
       shopFlat[i * 2 + 1] = results[i].lat;
     }
@@ -510,7 +511,7 @@ async function handleSupplyPoints(url, env) {
     try {
       const dists = wasmRouteDistances(routeFlat, shopFlat);
       const out = [];
-      for (let i = 0; i < results.length; i += 1) {
+      for (let i = 0; i < rawCount; i += 1) {
         const d = dists[i];
         if (d <= distanceM) {
           // 各 row に route_distance_m を埋め込んで返す (client が再 fetch
@@ -532,6 +533,10 @@ async function handleSupplyPoints(url, env) {
   } else {
     collection = toFeatureCollection(results || []);
   }
+  // raw_count = D1 query が返した件数 (filter 前)。client は features.length
+  // ではなくこの値でページング継続を判定する。route filter で 0 件残りでも
+  // raw_count == LIMIT なら次ページ存在の可能性あり (CodeRabbit PR #89 指摘)。
+  collection.raw_count = rawCount;
   return Response.json(collection, {
     headers: {
       'content-type': 'application/geo+json; charset=utf-8',

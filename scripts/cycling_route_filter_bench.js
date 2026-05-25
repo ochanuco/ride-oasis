@@ -116,9 +116,13 @@ function main() {
     const jsMs = bench(`${n}x${m} JS`, () => { jsOut = jsRouteDistances(route, shops); }, 3);
     const wasmMs = bench(`${n}x${m} WASM`, () => { wasmOut = route_distances(routeFlat, shopFlat); }, 3);
 
-    // diff check (Float32 precision)
+    // diff check (Float32 precision)。長さ不一致を見落とすと検証が崩れる
+    // ので最初に明示チェック (CodeRabbit PR #89 指摘)。
+    if (!wasmOut || jsOut.length !== wasmOut.length) {
+      throw new Error(`Output length mismatch: js=${jsOut?.length} wasm=${wasmOut?.length}`);
+    }
     let maxDiff = 0;
-    for (let i = 0; i < shops.length; i += 1) {
+    for (let i = 0; i < jsOut.length; i += 1) {
       const d = Math.abs(jsOut[i] - wasmOut[i]);
       if (d > maxDiff) maxDiff = d;
     }

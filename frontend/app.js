@@ -1657,7 +1657,12 @@ function buildRouteQueryParam(routeSnapshot) {
   // lon,lat;lon,lat;... 形式。小数 6 桁 (約 0.1m 精度) で encode。
   const parts = simplified.map(([lon, lat]) => `${lon.toFixed(6)},${lat.toFixed(6)}`);
   const joined = parts.join(';');
-  if (joined.length > ROUTE_PARAM_MAX_BYTES) return null;
+  // URLSearchParams で送ると `,` `;` が %2C `%3B に展開され実バイト数が
+  // 大幅に膨らむ。生文字列長で判定すると 7KB 上限を素通りして 21KB 級まで
+  // 行ってしまうので、encodeURIComponent 後の byte 長で guard する
+  // (CodeRabbit PR #89 指摘)。
+  const encodedBytes = new TextEncoder().encode(encodeURIComponent(joined)).length;
+  if (encodedBytes > ROUTE_PARAM_MAX_BYTES) return null;
   return joined;
 }
 
@@ -1700,7 +1705,11 @@ async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
         features.push(feature);
       }
     }
-    if (page.features.length < API_PAGE_LIMIT) {
+    // page.raw_count = D1 query が返した filter 前の件数。route filter で
+    // 0 件残りでも raw_count == LIMIT なら次ページ存在の可能性あり。
+    // 後方互換: raw_count 無いなら従来通り features.length で判断。
+    const rawCount = Number.isFinite(page.raw_count) ? page.raw_count : page.features.length;
+    if (rawCount < API_PAGE_LIMIT) {
       break;
     }
     offset += API_PAGE_LIMIT;
@@ -1722,40 +1731,49 @@ function filterMatchedPoints(featureCollection, routeSnapshot, distanceMeters) {
   const features = featureCollection.features;
   const origin = routeSnapshot[0] || null;
 
-  // WASM fast path: 全 shop の距離を 1 回の WASM 呼び出しで batch 計算
+  // WASM fast path: 全 shop の距離を 1 回の WASM 呼び出しで batch 計算。
+  // 実行時例外も try/catch で握って JS path に逃がす (CodeRabbit PR #89 指摘)。
   if (
     features.length > 0 &&
     routeSnapshot.length >= 2 &&
     window.RouterWasm && window.RouterWasm.routeDistances
   ) {
-    // flatten route: [[lon, lat], ...] → Float64Array [lon0, lat0, lon1, lat1, ...]
-    const routeFlat = new Float64Array(routeSnapshot.length * 2);
-    for (let i = 0; i < routeSnapshot.length; i += 1) {
-      routeFlat[i * 2] = routeSnapshot[i][0];
-      routeFlat[i * 2 + 1] = routeSnapshot[i][1];
-    }
-    const shopFlat = new Float64Array(features.length * 2);
-    for (let i = 0; i < features.length; i += 1) {
-      const c = features[i].geometry.coordinates;
-      shopFlat[i * 2] = c[0];
-      shopFlat[i * 2 + 1] = c[1];
-    }
-    const dists = window.RouterWasm.routeDistances(routeFlat, shopFlat);
-    const out = [];
-    for (let i = 0; i < features.length; i += 1) {
-      const d = dists[i];
-      if (d <= distanceMeters) {
-        out.push({
-          ...features[i],
-          properties: {
-            ...features[i].properties,
-            route_distance_m: d
-          }
-        });
+    try {
+      // flatten route: [[lon, lat], ...] → Float64Array [lon0, lat0, lon1, lat1, ...]
+      const routeFlat = new Float64Array(routeSnapshot.length * 2);
+      for (let i = 0; i < routeSnapshot.length; i += 1) {
+        routeFlat[i * 2] = routeSnapshot[i][0];
+        routeFlat[i * 2 + 1] = routeSnapshot[i][1];
       }
+      const shopFlat = new Float64Array(features.length * 2);
+      for (let i = 0; i < features.length; i += 1) {
+        const c = features[i].geometry.coordinates;
+        shopFlat[i * 2] = c[0];
+        shopFlat[i * 2 + 1] = c[1];
+      }
+      const dists = window.RouterWasm.routeDistances(routeFlat, shopFlat);
+      if (!dists || dists.length !== features.length) {
+        throw new Error(`route_distances length mismatch: features=${features.length} dists=${dists?.length}`);
+      }
+      const out = [];
+      for (let i = 0; i < features.length; i += 1) {
+        const d = dists[i];
+        if (d <= distanceMeters) {
+          out.push({
+            ...features[i],
+            properties: {
+              ...features[i].properties,
+              route_distance_m: d
+            }
+          });
+        }
+      }
+      out.sort((a, b) => a.properties.route_distance_m - b.properties.route_distance_m);
+      return out;
+    } catch (err) {
+      console.warn('[RouterWasm] routeDistances failed; falling back to JS', err);
+      // fall through to JS path
     }
-    out.sort((a, b) => a.properties.route_distance_m - b.properties.route_distance_m);
-    return out;
   }
 
   // JS fallback (routeSnapshot 1 点 or WASM 未初期化)
