@@ -6,10 +6,13 @@ import mapData from './lib/map_data.js';
 import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
 import dnfPackModule from './lib/cycling/dnf_pack.js';
-// Rust WASM router. wasm-pack build --target bundler の出力を Wrangler
-// (esbuild) が自動 bundle する。route_ch(buffers, fromLon, fromLat,
-// toLon, toLat, maxSnapM) → { distance, coords, ... } を返す同期関数。
-import { route_ch as wasmRouteCh } from './rust-router/pkg/rust_router.js';
+// Rust WASM router. wasm-pack 標準の rust_router.js は `import * as wasm
+// from "./*.wasm"` の namespace-import を使い、Cloudflare Workers Builds
+// の bundler では受け付けられない。代わりに rust_router_worker.js が
+// `[[rules]] CompiledWasm` 経由で WebAssembly.Module を受け取り Instance 化
+// する手書き wrapper。route_ch(buffers, fromLon, fromLat, toLon, toLat,
+// maxSnapM) → { distance, coords, ... } を返す同期関数。
+import { route_ch as wasmRouteCh } from './rust-router/pkg/rust_router_worker.js';
 
 const {
   parseSupplyPointFilters,
