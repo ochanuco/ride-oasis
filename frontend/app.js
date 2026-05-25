@@ -1657,11 +1657,12 @@ function buildRouteQueryParam(routeSnapshot) {
   // lon,lat;lon,lat;... 形式。小数 6 桁 (約 0.1m 精度) で encode。
   const parts = simplified.map(([lon, lat]) => `${lon.toFixed(6)},${lat.toFixed(6)}`);
   const joined = parts.join(';');
-  // URLSearchParams で送ると `,` `;` が %2C `%3B に展開され実バイト数が
+  // URLSearchParams で送ると `,` → `%2C` / `;` → `%3B` に展開され実バイト数が
   // 大幅に膨らむ。生文字列長で判定すると 7KB 上限を素通りして 21KB 級まで
-  // 行ってしまうので、encodeURIComponent 後の byte 長で guard する
+  // 行ってしまうので、URLSearchParams で実 encode した byte 長で guard する
   // (CodeRabbit PR #89 指摘)。
-  const encodedBytes = new TextEncoder().encode(encodeURIComponent(joined)).length;
+  const encodedRoute = new URLSearchParams({ route: joined }).toString();
+  const encodedBytes = new TextEncoder().encode(encodedRoute).length;
   if (encodedBytes > ROUTE_PARAM_MAX_BYTES) return null;
   return joined;
 }
