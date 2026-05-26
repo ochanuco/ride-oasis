@@ -751,19 +751,38 @@ function straightLineKm(a, b) {
   return window.RouteMath.pointToPointDistanceMeters(a, b) / 1000;
 }
 
-// segments を waypoints から再生成 (state は引き継がず初期化)。
-// 隣接 pair の直線距離が MAX_MANUAL_STRAIGHT_KM 超なら 'gray' 確定、
-// それ以下は 'pending' で CH 計算待ち。
+// segments を waypoints から再生成。**差分更新**: 両端 lonlat が変化して
+// いない segment は旧 state/coords を流用して computed の API 再取得を回避
+// (CodeRabbit PR #90 指摘)。これで waypoint 1 点の drag/insert/delete でも
+// 影響範囲外の segments は無傷で残り、操作レスポンスが劇的に良くなる。
 function rebuildSegmentsFromWaypoints() {
-  manualSegments = [];
-  for (let i = 0; i < manualPoints.length - 1; i += 1) {
-    const dKm = straightLineKm(manualPoints[i], manualPoints[i + 1]);
-    manualSegments.push({
-      state: dKm > MAX_MANUAL_STRAIGHT_KM ? 'gray' : 'pending',
-      coords: null,
-      dKm
-    });
+  const oldByKey = new Map();
+  for (const seg of manualSegments) {
+    if (Array.isArray(seg.from) && Array.isArray(seg.to)) {
+      oldByKey.set(`${seg.from[0]},${seg.from[1]}|${seg.to[0]},${seg.to[1]}`, seg);
+    }
   }
+  const next = [];
+  for (let i = 0; i < manualPoints.length - 1; i += 1) {
+    const from = manualPoints[i];
+    const to = manualPoints[i + 1];
+    const key = `${from[0]},${from[1]}|${to[0]},${to[1]}`;
+    const reused = oldByKey.get(key);
+    if (reused) {
+      // 旧 state/coords をそのまま流用 (両端変化なし = 内容変化なし)
+      next.push({ ...reused, from, to });
+    } else {
+      const dKm = straightLineKm(from, to);
+      next.push({
+        state: dKm > MAX_MANUAL_STRAIGHT_KM ? 'gray' : 'pending',
+        coords: null,
+        dKm,
+        from,
+        to
+      });
+    }
+  }
+  manualSegments = next;
 }
 
 // 指定 index の segments を CH 計算 (pending → computed/gray/error)。
@@ -2215,6 +2234,14 @@ async function applyManualResult(loadToken) {
   setStatus(msg);
   syncUrlState();
   if (loadToken !== latestRouteLoadToken) return;
+  // gray / error が残っている間は shop 検索を止める: 灰色区間の直線を
+  // pointToRouteDistanceMeters の基準に使うと「実経路と大きく離れた直線
+  // 沿いの shop」が候補に出て誤誘導になる (CodeRabbit PR #90 指摘)。
+  // ユーザが中継点追加で全 segment computed にしたら自動で再走する。
+  if (gray > 0 || err > 0) {
+    resetResults();
+    return;
+  }
   await refreshMap([...routeCoordinates]);
 }
 
