@@ -262,6 +262,71 @@
     };
   }
 
+  /**
+   * Douglas-Peucker line simplification (iterative; meter-tolerance).
+   * GPX route を /api/supply-points の route= query param に乗せる前に
+   * decimate するため (URL 上限 8KB 制限内に収めつつ、shop の "ルート
+   * からの距離" 計算精度はほぼ保持)。
+   *
+   * - coords: [[lon, lat], ...]
+   * - toleranceMeters: 許容垂直距離 (m)。100m なら 5000 vertices → ~200-500
+   *   程度に圧縮される (路線複雑度依存)。
+   * - 戻り値: decimate 後の同形式配列 (新規 array)。
+   * - 2 点以下なら原配列をそのまま返す。
+   */
+  function simplifyDouglasPeucker(coords, toleranceMeters) {
+    if (!Array.isArray(coords) || coords.length <= 2 || !(toleranceMeters > 0)) {
+      return coords.slice();
+    }
+    const referenceLat = meanLatitude(coords);
+    const projected = coords.map((c) => projectLonLatToMeters(c, referenceLat));
+    const n = coords.length;
+    const keep = new Uint8Array(n);
+    keep[0] = 1;
+    keep[n - 1] = 1;
+    const stack = [[0, n - 1]];
+    while (stack.length > 0) {
+      const [s, e] = stack.pop();
+      if (e - s < 2) continue;
+      const a = projected[s];
+      const b = projected[e];
+      const abx = b[0] - a[0];
+      const aby = b[1] - a[1];
+      const ab2 = abx * abx + aby * aby;
+      let maxD = -1;
+      let maxIdx = s + 1;
+      for (let i = s + 1; i < e; i += 1) {
+        const p = projected[i];
+        let d;
+        if (ab2 === 0) {
+          const dx = p[0] - a[0];
+          const dy = p[1] - a[1];
+          d = Math.hypot(dx, dy);
+        } else {
+          const apx = p[0] - a[0];
+          const apy = p[1] - a[1];
+          let t = (apx * abx + apy * aby) / ab2;
+          if (t < 0) t = 0;
+          else if (t > 1) t = 1;
+          const cx = a[0] + abx * t;
+          const cy = a[1] + aby * t;
+          d = Math.hypot(p[0] - cx, p[1] - cy);
+        }
+        if (d > maxD) { maxD = d; maxIdx = i; }
+      }
+      if (maxD > toleranceMeters) {
+        keep[maxIdx] = 1;
+        stack.push([s, maxIdx]);
+        stack.push([maxIdx, e]);
+      }
+    }
+    const out = [];
+    for (let i = 0; i < n; i += 1) {
+      if (keep[i]) out.push(coords[i]);
+    }
+    return out;
+  }
+
   return {
     computeBbox,
     expandBbox,
@@ -271,6 +336,7 @@
     bearingDegrees,
     isWithinHeadingDeg,
     cumulativeDistancesMeters,
-    routeProjection
+    routeProjection,
+    simplifyDouglasPeucker
   };
 });
