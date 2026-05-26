@@ -76,14 +76,33 @@ const endpointSource = new ol.source.Vector();
 const currentLocationSource = new ol.source.Vector();
 const coursePointSource = new ol.source.Vector();
 
+// Route line style: feature の segmentState で色切替。
+//   computed (CH 成功) → 青 (既存色)
+//   gray (>25km、計算不可)→ 灰色、破線で「計算不可」可視化
+//   pending (計算中)     → 薄青、破線
+//   error (API 失敗)     → 赤、破線
+// segmentState 未指定の feature (GPX 取り込みルート等) は青で従来通り。
+const ROUTE_STYLES = {
+  computed: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#225ea8', width: 4 })
+  }),
+  pending: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#7aa8d4', width: 3, lineDash: [6, 4] })
+  }),
+  gray: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#8a8a8a', width: 3, lineDash: [10, 6] })
+  }),
+  error: new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#c0392b', width: 3, lineDash: [6, 4] })
+  })
+};
 const routeLayer = new ol.layer.Vector({
   source: routeSource,
-  style: new ol.style.Style({
-    stroke: new ol.style.Stroke({
-      color: '#225ea8',
-      width: 4
-    })
-  })
+  style(feature) {
+    const state = feature.get('segmentState');
+    if (state && ROUTE_STYLES[state]) return ROUTE_STYLES[state];
+    return ROUTE_STYLES.computed;
+  }
 });
 
 const pointLayer = new ol.layer.Vector({
@@ -108,6 +127,17 @@ const endpointLayer = new ol.layer.Vector({
   source: endpointSource,
   style(feature) {
     const kind = feature.get('kind');
+    // intermediate waypoint = PR #90 で導入。灰色直線セグメントを分割
+    // するためにユーザがクリックして挿入する点。小さめ円で目立たせず。
+    if (kind === 'intermediate') {
+      return new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 6,
+          fill: new ol.style.Fill({ color: '#f4a020' }),
+          stroke: new ol.style.Stroke({ color: '#fff', width: 1.5 })
+        })
+      });
+    }
     const fill = kind === 'start' ? '#0b8f3f' : '#c62f2f';
     const points = kind === 'start' ? 3 : 4;
     const angle = kind === 'start' ? Math.PI / 2 : Math.PI / 4;
@@ -208,7 +238,16 @@ let coursePointChartDotsCache = {
   disabledTypes: null,
   dots: []
 };
+// manualPoints: 多 waypoint 対応 (N-array、最低 0、最大は実用上 10 程度)
+// 旧 max-2 仕様を拡張。waypoints[0] = start、waypoints[N-1] = goal、
+// 中間は intermediate (PR #90 で導入、灰色直線セグメントの分割用)
 let manualPoints = [];
+// 隣接 waypoint 対の状態。len = manualPoints.length - 1
+//   state: 'pending' (未計算) / 'computed' (CH 成功・blue) /
+//          'gray' (直線距離 > 25km・灰色) / 'error' (API 失敗)
+//   coords: state=computed の時のみ [[lon,lat]...]、それ以外は null
+const MAX_MANUAL_STRAIGHT_KM = 25;
+let manualSegments = [];
 let cachedCoursePoints = [];
 let disabledCoursePointTypes = new Set();
 let currentRwgId = null;
@@ -674,30 +713,126 @@ function renderRoute(feature) {
   }
 }
 
-/** Renders manual-mode endpoints and the connecting straight LineString. */
+/** Renders manual-mode endpoints and per-segment LineStrings (multi-waypoint). */
 function renderManualPoints() {
   clearRouteVisualSources();
 
   if (manualPoints.length === 0) return;
 
-  const start = new ol.Feature({
-    geometry: new ol.geom.Point(ol.proj.fromLonLat(manualPoints[0]))
-  });
-  start.set('kind', 'start');
-  endpointSource.addFeature(start);
-
-  if (manualPoints.length >= 2) {
-    const goal = new ol.Feature({
-      geometry: new ol.geom.Point(ol.proj.fromLonLat(manualPoints[1]))
+  // Endpoints: start (0) / goal (N-1) / intermediate (1..N-2)
+  for (let i = 0; i < manualPoints.length; i += 1) {
+    const f = new ol.Feature({
+      geometry: new ol.geom.Point(ol.proj.fromLonLat(manualPoints[i]))
     });
-    goal.set('kind', 'goal');
-    endpointSource.addFeature(goal);
+    if (i === 0) f.set('kind', 'start');
+    else if (i === manualPoints.length - 1) f.set('kind', 'goal');
+    else f.set('kind', 'intermediate');
+    f.set('waypointIndex', i);
+    endpointSource.addFeature(f);
+  }
 
+  // Segments: state per pair (computed=blue / gray=灰色直線 / pending / error)
+  for (let i = 0; i < manualSegments.length; i += 1) {
+    const seg = manualSegments[i];
+    let coordsLL;
+    if (seg.state === 'computed' && Array.isArray(seg.coords) && seg.coords.length >= 2) {
+      coordsLL = seg.coords;
+    } else {
+      // gray / pending / error は直線で繋ぐ
+      coordsLL = [manualPoints[i], manualPoints[i + 1]];
+    }
     const line = new ol.Feature({
-      geometry: new ol.geom.LineString(manualPoints.map((coord) => ol.proj.fromLonLat(coord)))
+      geometry: new ol.geom.LineString(coordsLL.map((c) => ol.proj.fromLonLat(c)))
     });
+    line.set('kind', 'manual-segment');
+    line.set('segmentIndex', i);
+    line.set('segmentState', seg.state);
     routeSource.addFeature(line);
   }
+}
+
+// 直線距離 (km) を返す。RouteMath.pointToPointDistanceMeters を再利用。
+function straightLineKm(a, b) {
+  return window.RouteMath.pointToPointDistanceMeters(a, b) / 1000;
+}
+
+// segments を waypoints から再生成。**差分更新**: 両端 lonlat が変化して
+// いない segment は旧 state/coords を流用して computed の API 再取得を回避
+// (CodeRabbit PR #90 指摘)。これで waypoint 1 点の drag/insert/delete でも
+// 影響範囲外の segments は無傷で残り、操作レスポンスが劇的に良くなる。
+function rebuildSegmentsFromWaypoints() {
+  const oldByKey = new Map();
+  for (const seg of manualSegments) {
+    if (Array.isArray(seg.from) && Array.isArray(seg.to)) {
+      oldByKey.set(`${seg.from[0]},${seg.from[1]}|${seg.to[0]},${seg.to[1]}`, seg);
+    }
+  }
+  const next = [];
+  for (let i = 0; i < manualPoints.length - 1; i += 1) {
+    const from = manualPoints[i];
+    const to = manualPoints[i + 1];
+    const key = `${from[0]},${from[1]}|${to[0]},${to[1]}`;
+    const reused = oldByKey.get(key);
+    if (reused) {
+      // 旧 state/coords をそのまま流用 (両端変化なし = 内容変化なし)
+      next.push({ ...reused, from, to });
+    } else {
+      const dKm = straightLineKm(from, to);
+      next.push({
+        state: dKm > MAX_MANUAL_STRAIGHT_KM ? 'gray' : 'pending',
+        coords: null,
+        dKm,
+        from,
+        to
+      });
+    }
+  }
+  manualSegments = next;
+}
+
+// 指定 index の segments を CH 計算 (pending → computed/gray/error)。
+// 並列 fetch。load token を引数で受け取り、stale request を破棄。
+async function computeManualSegments(indices, loadToken) {
+  const tasks = indices.map(async (i) => {
+    if (i < 0 || i >= manualSegments.length) return;
+    const seg = manualSegments[i];
+    if (seg.state !== 'pending') return; // gray は計算しない
+    const from = manualPoints[i];
+    const to = manualPoints[i + 1];
+    const routed = await fetchCyclingRoute(from, to, loadToken);
+    if (loadToken !== latestRouteLoadToken) return;
+    if (routed && Array.isArray(routed.coordinates) && routed.coordinates.length >= 2) {
+      seg.state = 'computed';
+      seg.coords = routed.coordinates;
+    } else if (routed && routed.error === 'too_far') {
+      // worker が too_far 返した = 25km 超。直線距離計算が緩かったケース
+      seg.state = 'gray';
+      seg.coords = null;
+    } else {
+      seg.state = 'error';
+      seg.coords = null;
+    }
+  });
+  await Promise.all(tasks);
+}
+
+// computed segments の coords を順に concat して 1 本の routeCoordinates に。
+// gray segments は直線 2 点で繋ぐ (UI から見ると "繋がってる" 風)。
+function flattenManualRoute() {
+  const out = [];
+  for (let i = 0; i < manualSegments.length; i += 1) {
+    const seg = manualSegments[i];
+    const coords = seg.state === 'computed' && Array.isArray(seg.coords)
+      ? seg.coords
+      : [manualPoints[i], manualPoints[i + 1]];
+    if (i === 0) {
+      out.push(...coords);
+    } else {
+      // 前 segment の終端と今 segment の起点は重複なので 1 個飛ばし
+      out.push(...coords.slice(1));
+    }
+  }
+  return out;
 }
 
 /** Renders a single current-location marker instead of a route line. */
@@ -2088,18 +2223,20 @@ async function fetchCyclingRoute(from, to, loadToken) {
   }
 }
 
-/** Records a manual map click as start (1st click) or goal (2nd click) and refreshes the map. */
+/** Multi-waypoint click handler. 1st click = start, 2nd = goal, 3rd+ = no-op
+ *  (waypoint 追加は 灰色 segment のクリックから handleManualSegmentClick で行う)。 */
 async function handleManualMapClick(mapCoord) {
   if (manualPoints.length >= 2) return;
 
   const lonLat = ol.proj.toLonLat(mapCoord);
   manualPoints.push([lonLat[0], lonLat[1]]);
-  renderManualPoints();
 
   const loadToken = ++latestRouteLoadToken;
   cancelPendingRefreshes();
 
   if (manualPoints.length === 1) {
+    manualSegments = [];
+    renderManualPoints();
     routeFeature = null;
     routeCoordinates = [];
     routeElevations = [];
@@ -2111,51 +2248,140 @@ async function handleManualMapClick(mapCoord) {
     return;
   }
 
+  // 2 点目: segments を再構築 + pending segment を CH 計算
+  rebuildSegmentsFromWaypoints();
+  renderManualPoints();
   setStatus('ルート計算中…');
-  const routed = await fetchCyclingRoute(manualPoints[0], manualPoints[1], loadToken);
+  await computeManualSegments(manualSegments.map((_, i) => i), loadToken);
   if (loadToken !== latestRouteLoadToken) return;
+  await applyManualResult(loadToken);
+}
 
-  const coordsFromApi = routed && Array.isArray(routed.coordinates) ? routed.coordinates : null;
-  const coords = coordsFromApi || manualPoints.map((coord) => [coord[0], coord[1]]);
-  if (coordsFromApi) {
-    const parsedRoute = createRouteFeatureFromCoords(coords);
-    routeFeature = parsedRoute.feature;
-    clearRouteVisualSources();
-    renderRoute(parsedRoute.feature);
-  } else {
-    routeFeature = routeSource.getFeatures()[0] || null;
+/** 灰色 segment クリックで waypoint 挿入。クリック座標を直近の灰色
+ *  segment の endpoints の間に挿入し、隣接 segments を再計算する。 */
+async function handleManualSegmentClick(segmentIndex, mapCoord) {
+  if (segmentIndex < 0 || segmentIndex >= manualSegments.length) return;
+  const seg = manualSegments[segmentIndex];
+  if (seg.state !== 'gray') return; // computed / pending は分割しない
+  const lonLat = ol.proj.toLonLat(mapCoord);
+  const insertAt = segmentIndex + 1;
+  manualPoints.splice(insertAt, 0, [lonLat[0], lonLat[1]]);
+
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+
+  rebuildSegmentsFromWaypoints();
+  renderManualPoints();
+  setStatus('ルート計算中…');
+  // 挿入後は全 pending を再計算 (簡素化、最適化余地: 影響 segments のみ)
+  await computeManualSegments(manualSegments.map((_, i) => i), loadToken);
+  if (loadToken !== latestRouteLoadToken) return;
+  await applyManualResult(loadToken);
+}
+
+/** waypoint 削除 (dblclick)。中間点削除なら左右 segment 結合 + 再計算。
+ *  端点 (start / goal) 削除は manualPoints から外して状態リセット。 */
+async function handleManualWaypointDelete(idx) {
+  if (idx < 0 || idx >= manualPoints.length) return;
+  manualPoints.splice(idx, 1);
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+
+  if (manualPoints.length < 2) {
+    // start 単独 or 空: route も segments も初期化
+    manualSegments = [];
+    renderManualPoints();
+    routeFeature = null;
+    routeCoordinates = [];
+    routeElevations = [];
+    rebuildRouteElevationCache();
+    resetResults();
+    updateRoutePointCount();
+    renderElevationChart();
+    setStatus(manualPoints.length === 0
+      ? '地図をタップして出発地を指定してください'
+      : '目的地をクリックしてください');
+    return;
   }
 
-  routeCoordinates = coords;
+  rebuildSegmentsFromWaypoints();
+  renderManualPoints();
+  setStatus('ルート再計算中…');
+  await computeManualSegments(manualSegments.map((_, i) => i), loadToken);
+  if (loadToken !== latestRouteLoadToken) return;
+  await applyManualResult(loadToken);
+}
+
+/** waypoint drag 終了時 (Modify interaction の modifyend で呼ばれる)。
+ *  drag された waypoint の隣接 segments のみ再計算 (それ以外は維持)。 */
+async function handleManualWaypointDragEnd(idx, newLonLat) {
+  if (idx < 0 || idx >= manualPoints.length) return;
+  manualPoints[idx] = [newLonLat[0], newLonLat[1]];
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+
+  rebuildSegmentsFromWaypoints();
+  renderManualPoints();
+  setStatus('ルート再計算中…');
+  // 隣接 segments のみ再計算 = idx-1, idx の 2 つ (端なら 1 つ)
+  const toCompute = [];
+  if (idx - 1 >= 0) toCompute.push(idx - 1);
+  if (idx < manualSegments.length) toCompute.push(idx);
+  // rebuildSegmentsFromWaypoints が全て pending/gray にしているので、
+  // 他 segments の元 state は失われている。簡素化のため全部再計算する。
+  // (UX 上 drag は遅くて構わない)
+  await computeManualSegments(manualSegments.map((_, i) => i), loadToken);
+  if (loadToken !== latestRouteLoadToken) return;
+  await applyManualResult(loadToken);
+}
+
+/** segments 計算結果を flatten して route 描画・shop 検索を流す共通処理。 */
+async function applyManualResult(loadToken) {
+  renderManualPoints(); // segments の最新 state で再描画
+  const flat = flattenManualRoute();
+  routeCoordinates = flat;
+  routeFeature = null; // multi-segment では従来の routeFeature は使わない
   routeElevations = [];
   rebuildRouteElevationCache();
   resetResults();
   updateRoutePointCount();
   fitToVisibleData();
   renderElevationChart();
-  let statusMsg;
-  if (coordsFromApi) {
-    statusMsg = '自転車ルートを生成しました';
-  } else if (routed && routed.error === 'too_far') {
-    const km = Math.round(routed.straight_line_m / 100) / 10;
-    const maxKm = Math.round(routed.max_straight_line_m / 1000);
-    statusMsg = `2点間が遠すぎます (${km}km > ${maxKm}km)。直線で代用します`;
-  } else if (routed && routed.error === 'unreachable_in_corridor') {
-    statusMsg = 'ルート探索範囲外のため直線で代用します';
-  } else if (routed && (routed.error === 'no_nearby_node_from' || routed.error === 'no_nearby_node_to')) {
-    statusMsg = '近くに道路が見つかりませんでした。直線で代用します';
+
+  const total = manualSegments.length;
+  const computed = manualSegments.filter((s) => s.state === 'computed').length;
+  const gray = manualSegments.filter((s) => s.state === 'gray').length;
+  const err = manualSegments.filter((s) => s.state === 'error').length;
+  let msg;
+  if (gray > 0) {
+    msg = `灰色区間 ${gray}/${total} は 25km 超で計算不可。灰色線をクリックして中継点を追加してください`;
+  } else if (err > 0) {
+    msg = `${err}/${total} 区間で API エラー (直線代用)`;
+  } else if (computed === total) {
+    msg = total === 1
+      ? '自転車ルートを生成しました'
+      : `${total} 区間すべてルート計算完了`;
   } else {
-    statusMsg = 'ルート計算 API 未配備のため直線で生成しました';
+    msg = `${computed}/${total} 区間ルート計算完了`;
   }
-  setStatus(statusMsg);
+  setStatus(msg);
   syncUrlState();
   if (loadToken !== latestRouteLoadToken) return;
+  // gray / error が残っている間は shop 検索を止める: 灰色区間の直線を
+  // pointToRouteDistanceMeters の基準に使うと「実経路と大きく離れた直線
+  // 沿いの shop」が候補に出て誤誘導になる (CodeRabbit PR #90 指摘)。
+  // ユーザが中継点追加で全 segment computed にしたら自動で再走する。
+  if (gray > 0 || err > 0) {
+    resetResults();
+    return;
+  }
   await refreshMap([...routeCoordinates]);
 }
 
 /** Resets manual-mode state so the user can re-pick start and goal. */
 function resetManualState() {
   manualPoints = [];
+  manualSegments = [];
   routeFeature = null;
   routeCoordinates = [];
   routeElevations = [];
@@ -2730,8 +2956,80 @@ function bindEvents() {
     }
     clearPopup();
     if (selectedSourceMode() === 'manual') {
+      // 灰色 segment 上のクリックは waypoint 挿入 (>25km の分割)
+      const segFeature = map.forEachFeatureAtPixel(
+        event.pixel,
+        (candidate) => {
+          if (candidate.get('kind') === 'manual-segment' && candidate.get('segmentState') === 'gray') {
+            return candidate;
+          }
+          return undefined;
+        }
+      );
+      if (segFeature) {
+        handleManualSegmentClick(segFeature.get('segmentIndex'), event.coordinate);
+        return;
+      }
       handleManualMapClick(event.coordinate);
     }
+  });
+
+  // waypoint drag = ol.interaction.Translate (Modify より drag に向く;
+  // Modify は grab tolerance 10px で掴みづらい / vertex 追加 mode と
+  // 競合する。Translate は feature 単位の自由移動)。
+  // - filter: manual mode の start/goal/intermediate のみ
+  // - translateend で 1 回 (drag 中 every frame ではない) → 隣接 segment 再計算
+  // - hover で cursor 'move' に変更 (掴めることを可視化)
+  const translateInteraction = new ol.interaction.Translate({
+    layers: [endpointLayer],
+    filter: (feature) => {
+      if (selectedSourceMode() !== 'manual') return false;
+      const k = feature.get('kind');
+      return k === 'start' || k === 'goal' || k === 'intermediate';
+    }
+  });
+  translateInteraction.on('translateend', (ev) => {
+    if (selectedSourceMode() !== 'manual') return;
+    ev.features.forEach((feature) => {
+      const idx = feature.get('waypointIndex');
+      if (!Number.isInteger(idx)) return;
+      const coord3857 = feature.getGeometry().getCoordinates();
+      const lonLat = ol.proj.toLonLat(coord3857);
+      handleManualWaypointDragEnd(idx, lonLat);
+    });
+  });
+  map.addInteraction(translateInteraction);
+
+  // hover で cursor 'move' に。Translate interaction は標準で 'grab/grabbing'
+  // を出さないため自前で waypoint hover を検知して切替。
+  const mapTarget = map.getTargetElement();
+  map.on('pointermove', (event) => {
+    if (event.dragging) return;
+    if (selectedSourceMode() !== 'manual') {
+      mapTarget.style.cursor = '';
+      return;
+    }
+    const hit = map.forEachFeatureAtPixel(event.pixel, (candidate) => {
+      const k = candidate.get('kind');
+      return (k === 'start' || k === 'goal' || k === 'intermediate') ? candidate : undefined;
+    });
+    mapTarget.style.cursor = hit ? 'move' : '';
+  });
+
+  // waypoint dblclick で削除 (端点でなければ)。中間点を削除すると左右の
+  // segment が結合され、25km 超ならまた灰色に戻る。
+  map.on('dblclick', (event) => {
+    if (selectedSourceMode() !== 'manual') return;
+    const wpFeature = map.forEachFeatureAtPixel(event.pixel, (candidate) => {
+      const k = candidate.get('kind');
+      return (k === 'start' || k === 'goal' || k === 'intermediate') ? candidate : undefined;
+    });
+    if (!wpFeature) return;
+    const idx = wpFeature.get('waypointIndex');
+    if (!Number.isInteger(idx)) return;
+    event.stopPropagation();
+    event.preventDefault();
+    handleManualWaypointDelete(idx);
   });
 }
 
