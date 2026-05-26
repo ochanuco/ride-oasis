@@ -188,6 +188,9 @@
       window.RIDEOASIS_API_BASE = window.RIDEOASIS_API_BASE || "/api";
     </script>
     <script src="https://cdn.jsdelivr.net/npm/ol@10.9.0/dist/ol.js"></script>
+    <!-- Rust WASM (route_distances) を非同期初期化して window.RouterWasm に公開。
+         app.js は window.RouterWasm の有無で WASM/JS をオプトイン切替する。 -->
+    <script type="module" src="./wasm_bootstrap.mjs"></script>
     <script src="./route_math.js"></script>
     <script src="./gpx.js"></script>
     <script src="./fit.js"></script>

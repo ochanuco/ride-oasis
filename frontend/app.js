@@ -254,6 +254,9 @@ let currentRwgId = null;
 let pendingCptypesFilter = null;
 let allMatchedPoints = [];
 let filteredPoints = [];
+let lastCandidates = null;
+let lastRouteSnapshot = null;
+let wasmReadyHandlerInstalled = false;
 let activeSupplyPointId = null;
 let activePopupKind = null;
 let activeCoursePointType = null;
@@ -332,6 +335,8 @@ function syncSourceModeUi() {
 function resetResults() {
   allMatchedPoints = [];
   filteredPoints = [];
+  lastCandidates = null;
+  lastRouteSnapshot = null;
   featureIndex.clear();
   pointSource.clear();
   buildPointList([]);
@@ -1770,9 +1775,44 @@ function expandedBboxForQuery(routeSnapshot, distanceMeters) {
   return window.RouteMath.quantizeBbox(padded, SUPPLY_POINTS_BBOX_GRID_DEG);
 }
 
+// ルートを query param に乗せる時の Douglas-Peucker 許容ズレ (m)。
+// 100m なら ブルベ規模の 5000 vertices route が ~200-500 vertex に圧縮
+// (約 22B/vertex × 500 = 11KB → 大半は URL 8KB 制限超なので server 側で
+// 拒否されたら client filter にフォールバック)。
+const ROUTE_PARAM_SIMPLIFY_M = 100;
+// Server side のリクエスト URL 上限 (8KB) を超えそうな場合は route 送信を
+// 諦めて bbox-only にフォールバック。安全マージンで 7000B。
+const ROUTE_PARAM_MAX_BYTES = 7000;
+
+/**
+ * 送信用 route param 文字列を作る。ルートが大きすぎる場合は null を返して
+ * route param を付けない (bbox-only フォールバック)。
+ */
+function buildRouteQueryParam(routeSnapshot) {
+  if (!Array.isArray(routeSnapshot) || routeSnapshot.length < 2) return null;
+  const simplified = window.RouteMath.simplifyDouglasPeucker(
+    routeSnapshot,
+    ROUTE_PARAM_SIMPLIFY_M
+  );
+  // lon,lat;lon,lat;... 形式。小数 6 桁 (約 0.1m 精度) で encode。
+  const parts = simplified.map(([lon, lat]) => `${lon.toFixed(6)},${lat.toFixed(6)}`);
+  const joined = parts.join(';');
+  // URLSearchParams で送ると `,` → `%2C` / `;` → `%3B` に展開され実バイト数が
+  // 大幅に膨らむ。生文字列長で判定すると 7KB 上限を素通りして 21KB 級まで
+  // 行ってしまうので、URLSearchParams で実 encode した byte 長で guard する
+  // (CodeRabbit PR #89 指摘)。
+  const encodedRoute = new URLSearchParams({ route: joined }).toString();
+  const encodedBytes = new TextEncoder().encode(encodedRoute).length;
+  if (encodedBytes > ROUTE_PARAM_MAX_BYTES) return null;
+  return joined;
+}
+
 /** Loads candidate supply points from the local API for the current filters. */
 async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
   const bbox = expandedBboxForQuery(routeSnapshot, distanceMeters);
+  // server side で route filter してくれるなら client は受信量が激減する。
+  // route param が大きすぎて URL 上限を超えそうなら null = bbox-only に。
+  const routeParam = buildRouteQueryParam(routeSnapshot);
   const features = [];
   const seenIds = new Set();
   let offset = 0;
@@ -1781,6 +1821,14 @@ async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
     const params = new URLSearchParams();
     if (bbox) {
       params.set('bbox', bbox.join(','));
+    }
+    if (routeParam) {
+      params.set('route', routeParam);
+      // 初回は wide threshold (3000m か user 設定値) で server filter。
+      // slider 操作で更に絞る時は client WASM 側で route_distance_m 再 filter
+      // するので、ここでは生成的に粗く取って渡す。
+      const initialThreshold = Math.max(distanceMeters, 1000);
+      params.set('route_distance_m', String(Math.ceil(initialThreshold)));
     }
     params.set('min_point_level', String(DEFAULT_MIN_POINT_LEVEL));
     params.set('limit', String(API_PAGE_LIMIT));
@@ -1798,7 +1846,11 @@ async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
         features.push(feature);
       }
     }
-    if (page.features.length < API_PAGE_LIMIT) {
+    // page.raw_count = D1 query が返した filter 前の件数。route filter で
+    // 0 件残りでも raw_count == LIMIT なら次ページ存在の可能性あり。
+    // 後方互換: raw_count 無いなら従来通り features.length で判断。
+    const rawCount = Number.isFinite(page.raw_count) ? page.raw_count : page.features.length;
+    if (rawCount < API_PAGE_LIMIT) {
       break;
     }
     offset += API_PAGE_LIMIT;
@@ -1810,10 +1862,63 @@ async function fetchCandidatePoints(routeSnapshot, distanceMeters) {
   };
 }
 
-/** Applies the browser-side point-to-route distance filter. */
+/** Applies the browser-side point-to-route distance filter.
+ *
+ * 高速化: window.RouterWasm.routeDistances が ready なら Rust WASM で
+ * batch 計算 (5-10x 速い)。failed/older browser では従来の JS loop に
+ * フォールバック。
+ */
 function filterMatchedPoints(featureCollection, routeSnapshot, distanceMeters) {
+  const features = featureCollection.features;
   const origin = routeSnapshot[0] || null;
-  return featureCollection.features
+
+  // WASM fast path: 全 shop の距離を 1 回の WASM 呼び出しで batch 計算。
+  // 実行時例外も try/catch で握って JS path に逃がす (CodeRabbit PR #89 指摘)。
+  if (
+    features.length > 0 &&
+    routeSnapshot.length >= 2 &&
+    window.RouterWasm && window.RouterWasm.routeDistances
+  ) {
+    try {
+      // flatten route: [[lon, lat], ...] → Float64Array [lon0, lat0, lon1, lat1, ...]
+      const routeFlat = new Float64Array(routeSnapshot.length * 2);
+      for (let i = 0; i < routeSnapshot.length; i += 1) {
+        routeFlat[i * 2] = routeSnapshot[i][0];
+        routeFlat[i * 2 + 1] = routeSnapshot[i][1];
+      }
+      const shopFlat = new Float64Array(features.length * 2);
+      for (let i = 0; i < features.length; i += 1) {
+        const c = features[i].geometry.coordinates;
+        shopFlat[i * 2] = c[0];
+        shopFlat[i * 2 + 1] = c[1];
+      }
+      const dists = window.RouterWasm.routeDistances(routeFlat, shopFlat);
+      if (!dists || dists.length !== features.length) {
+        throw new Error(`route_distances length mismatch: features=${features.length} dists=${dists?.length}`);
+      }
+      const out = [];
+      for (let i = 0; i < features.length; i += 1) {
+        const d = dists[i];
+        if (d <= distanceMeters) {
+          out.push({
+            ...features[i],
+            properties: {
+              ...features[i].properties,
+              route_distance_m: d
+            }
+          });
+        }
+      }
+      out.sort((a, b) => a.properties.route_distance_m - b.properties.route_distance_m);
+      return out;
+    } catch (err) {
+      console.warn('[RouterWasm] routeDistances failed; falling back to JS', err);
+      // fall through to JS path
+    }
+  }
+
+  // JS fallback (routeSnapshot 1 点 or WASM 未初期化)
+  return features
     .map((feature) => {
       const distance = routeSnapshot.length >= 2
         ? window.RouteMath.pointToRouteDistanceMeters(feature.geometry.coordinates, routeSnapshot)
@@ -1883,8 +1988,36 @@ async function refreshMap(routeSnapshot = [...routeCoordinates]) {
   try {
     const candidates = await fetchCandidatePoints(routeSnapshot, distanceMeters);
     if (refreshToken !== latestRefreshToken) return;
+
+    // Race condition 回避: WASM が後から準備完了した場合に再フィルタできるよう保存。
+    lastCandidates = candidates;
+    lastRouteSnapshot = routeSnapshot;
+
     allMatchedPoints = filterMatchedPoints(candidates, routeSnapshot, distanceMeters);
     if (refreshToken !== latestRefreshToken) return;
+
+    // WASM が使用されなかった場合、準備完了時に再フィルタするハンドラを一度だけ登録。
+    if (
+      !wasmReadyHandlerInstalled &&
+      routeSnapshot.length >= 2 &&
+      window.RouterWasmReady &&
+      !window.RouterWasm
+    ) {
+      wasmReadyHandlerInstalled = true;
+      window.RouterWasmReady.then((wasmAvailable) => {
+        if (!wasmAvailable || !window.RouterWasm) return;
+        // WASM が利用可能になったので、最新の candidates を WASM で再フィルタ。
+        if (lastCandidates && lastRouteSnapshot && lastRouteSnapshot.length >= 2) {
+          console.log('[RouterWasm] re-filtering with WASM after late initialization');
+          const distanceMeters = selectedDistanceMeters();
+          allMatchedPoints = filterMatchedPoints(lastCandidates, lastRouteSnapshot, distanceMeters);
+          applyResultFilters();
+        }
+      }).catch((err) => {
+        console.warn('[RouterWasm] readiness check failed:', err);
+      });
+    }
+
     applyResultFilters();
   } catch (error) {
     if (refreshToken !== latestRefreshToken) return;
