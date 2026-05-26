@@ -157,3 +157,4 @@ GitHub Actions では dependency review を有効化し、`package.json` / `pack
 - `strict_success_rate`（`point_level >= 閾値` を満たす成功率）
 - `point_level` 分布（1 / 2 / 3 / 8 / null）
 - `unresolved_rows`（未解決件数）
+
