@@ -2613,25 +2613,47 @@ async function handleGenerateLoop() {
       return { coordinates: coords };
     };
 
-    const result = await window.LoopCourse.generateLoopCourses(center, km, n, routeLeg);
+    // 変種（ループ 1 本）ごとに独立生成して、出来たものから順次描画する。
+    // 各脚の /api/route はタイル/経路のキャッシュが冷えていると遅いので、全本
+    // 揃うのを待たず、最初に完成した 1 本をすぐ選択して操作できるようにする。
+    loopCandidates = [];
+    selectedLoopIndex = -1;
+    renderLoopCandidates(); // 中心マーカーだけ先に出す
+    const baseStep = 360 / n;
+    let firstSelected = false;
+    const tasks = [];
+    for (let i = 0; i < n; i += 1) {
+      const bearingOffsetDeg = Math.round(baseStep * i);
+      const direction = i % 2 === 0 ? 1 : -1;
+      tasks.push(
+        window.LoopCourse
+          .generateLoopCourse(center, km, { bearingOffsetDeg, direction }, routeLeg)
+          .then((course) => {
+            if (loadToken !== latestRouteLoadToken || !course) return;
+            loopCandidates.push({
+              coordinates: course.coordinates,
+              distanceKm: Math.round(course.distanceKm * 100) / 100,
+              direction: course.direction === 1 ? 'cw' : 'ccw',
+              converged: course.converged
+            });
+            renderLoopCandidates();
+            renderLoopCandidateList();
+            if (!firstSelected) {
+              firstSelected = true;
+              selectLoopCandidate(loopCandidates.length - 1);
+            }
+            setStatus(`周回ルート生成中... (${loopCandidates.length}/${n} 本完成)`);
+          })
+          .catch(() => { /* この変種は捨てる */ })
+      );
+    }
+    await Promise.all(tasks);
     if (loadToken !== latestRouteLoadToken) return;
-    const candidates = (result.courses || []).map((c) => ({
-      coordinates: c.coordinates,
-      distanceKm: Math.round(c.distanceKm * 100) / 100,
-      direction: c.direction === 1 ? 'cw' : 'ccw',
-      converged: c.converged
-    }));
-    if (candidates.length === 0) {
-      setStatus('この地点では周回ルートを生成できませんでした (地図データ範囲外の可能性)');
+    if (loopCandidates.length === 0) {
+      setStatus('この地点では周回ルートを生成できませんでした (地図データ範囲外 / 距離が大きすぎる可能性)');
       return;
     }
-    loopCandidates = candidates;
-    selectedLoopIndex = -1;
-    renderLoopCandidates();
-    renderLoopCandidateList();
-    setStatus(`${candidates.length} 本の周回ルートを生成しました`);
-    // 既定で最も目標距離に近い 1 本目を選択し、補給地点をマッチさせる。
-    selectLoopCandidate(0);
+    setStatus(`${loopCandidates.length} 本の周回ルートを生成しました`);
   } catch (error) {
     if (loadToken !== latestRouteLoadToken) return;
     const message = error?.code === 1

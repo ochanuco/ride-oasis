@@ -37,10 +37,15 @@
   const DEFAULT_COUNT = 3;
   const MAX_COUNT = 3;
   const MIN_COUNT = 1;
-  // 1 脚の直線距離の上限（ルーターの corridor/segment 上限 25km より余裕を持たせる）
-  const MAX_LEG_KM = 18;
+  // 1 脚の直線距離の上限。/api/route は長い脚（≳18km）だと山間部など corridor が
+  // 大きい方向で 1102(exceededMemory) になることがある。実測で 12km なら全方位で
+  // 安定したため 12km にする（脚は増えるが各リクエストが軽く・速く・安全になる）。
+  const MAX_LEG_KM = 12;
   const DEFAULT_TOLERANCE = 0.1; // ±10%
   const MAX_ITERATIONS = 3;
+  // 道なりは直線円より長くなる（実測で routed/円 ≈ 1.2〜1.3）。初期半径をその
+  // ぶん小さめに置くと、ρ *= target/total の補正が少回数で収束する。
+  const INITIAL_RADIUS_FACTOR = 0.82;
   const MIN_VERTEX_COUNT = 6;
 
   function toRad(deg) {
@@ -212,7 +217,7 @@
     }
     if (typeof leg !== 'function') return null;
 
-    let radiusKm = targetKm / (2 * Math.PI);
+    let radiusKm = (targetKm / (2 * Math.PI)) * INITIAL_RADIUS_FACTOR;
     let best = null;
 
     for (let iter = 0; iter < maxIterations; iter += 1) {
