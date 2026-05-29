@@ -10,6 +10,7 @@ import mapData from './lib/map_data.js';
 import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
 import dnfPackModule from './lib/cycling/dnf_pack.js';
+import loopCourseModule from './lib/cycling/loop_course.js';
 // Rust WASM router. wasm-pack 標準の rust_router.js は `import * as wasm
 // from "./*.wasm"` の namespace-import を使い、Cloudflare Workers Builds
 // の bundler では受け付けられない。代わりに rust_router_worker.js が
@@ -28,10 +29,14 @@ const {
 const { TiledRouter } = tiledRouterModule;
 const { TileLoader, makeR2Fetcher } = tileLoaderModule;
 const { douglasPeucker, routeBBoxWithBuffer } = dnfPackModule;
+const { generateLoopCourses, DEFAULT_COUNT: LOOP_DEFAULT_COUNT } = loopCourseModule;
 
 const API_PATH = '/api/supply-points';
 const ROUTE_PATH = '/api/route';
 const DNF_PACK_PATH = '/api/dnf-pack';
+// random-course 名前空間: 現在地からの自動コース生成。将来 /landmark なども
+// 同じ prefix にぶら下げる想定。
+const RANDOM_COURSE_LOOP_PATH = '/api/random-course/loop';
 
 // Per-isolate tile loader cache. Tiles loaded from R2 are reused across
 // requests in the same isolate so repeat queries in the same city are cheap.
@@ -299,6 +304,123 @@ function neighborhoodKeysWasm(lon, lat, radius) {
     }
   }
   return out;
+}
+
+const RANDOM_COURSE_CACHE_TTL_S = 5 * 60;
+
+/**
+ * 現在地を中心に、総距離が km（最大 160km）の周回ルートを n 本（既定 3、
+ * 最大 3）自動生成して返す。出発点付近に戻ってくる真の周回ループ。
+ *
+ * リクエスト: ?center=lon,lat&km=120[&n=3]
+ *
+ * 処理:
+ *  1) lib/cycling/loop_course.generateLoopCourses に routeLeg を注入
+ *  2) routeLeg は /api/route と同じ WASM(route_ch) → JS フォールバックで
+ *     2 点間を結ぶ
+ *  3) 円周配置 → 脚ルーティング → 距離計測 → 半径補正の反復で目標 ±10% に
+ *     寄せる。方位回転＋周回方向で作り分け。
+ *
+ * 戻り: GeoJSON FeatureCollection（各 Feature が 1 本のループ）。
+ */
+async function handleRandomCourseLoop(url, env) {
+  const center = parseLonLat(url.searchParams.get('center'));
+  if (!center) {
+    return Response.json(
+      { error: 'center must be in "lon,lat" form' },
+      { status: 400 }
+    );
+  }
+  const kmRaw = String(url.searchParams.get('km') ?? '').trim();
+  const km = Number(kmRaw);
+  if (kmRaw === '' || !Number.isFinite(km) || km <= 0) {
+    return Response.json(
+      { error: 'km must be a positive number' },
+      { status: 400 }
+    );
+  }
+  let n = LOOP_DEFAULT_COUNT;
+  const nRaw = url.searchParams.get('n');
+  if (nRaw != null && String(nRaw).trim() !== '') {
+    const ni = Number(nRaw);
+    if (!Number.isFinite(ni) || ni < 1) {
+      return Response.json(
+        { error: 'n must be a positive integer' },
+        { status: 400 }
+      );
+    }
+    n = ni;
+  }
+
+  let loader;
+  try {
+    loader = ensureTileLoader(env);
+  } catch (err) {
+    if (err && err.code === 'no_graph_binding') {
+      return Response.json({ error: err.message }, { status: 503 });
+    }
+    throw err;
+  }
+
+  // 1 脚を /api/route と同じ経路で解く。WASM(route_ch) → 失敗時 JS CSR-only。
+  const routeLeg = async (from, to) => {
+    const wasm = await tryWasmRoute(loader, from, to);
+    let r = wasm;
+    if (!r) {
+      const router = new TiledRouter(loader, { csrOnly: true });
+      r = await router.route(from[0], from[1], to[0], to[1]);
+    }
+    if (!r || r.error) {
+      return { error: r ? r.error : 'route_failed' };
+    }
+    return { coordinates: r.coordinates };
+  };
+
+  const result = await generateLoopCourses(center, km, n, routeLeg);
+  if (!result.courses.length) {
+    return Response.json(
+      {
+        error: 'no_course_generated',
+        detail: 'could not build any loop in the covered area'
+      },
+      { status: 422 }
+    );
+  }
+
+  const round2 = (v) => Math.round(v * 100) / 100;
+  const features = result.courses.map((c, i) => ({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: c.coordinates },
+    properties: {
+      index: i,
+      distance_km: round2(c.distanceKm),
+      target_km: result.target_km,
+      error_ratio: Math.round(c.errRatio * 1000) / 1000,
+      converged: !!c.converged,
+      bearing_offset_deg: c.bearingOffsetDeg,
+      direction: c.direction === 1 ? 'cw' : 'ccw',
+      iterations: c.iterations
+    }
+  }));
+
+  return Response.json(
+    {
+      type: 'FeatureCollection',
+      features,
+      meta: {
+        center,
+        target_km: result.target_km,
+        requested: result.requested,
+        returned: features.length
+      }
+    },
+    {
+      headers: {
+        'content-type': 'application/geo+json; charset=utf-8',
+        'cache-control': `public, max-age=${RANDOM_COURSE_CACHE_TTL_S}`
+      }
+    }
+  );
 }
 
 /**
@@ -570,7 +692,12 @@ export default {
    */
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === API_PATH || url.pathname === ROUTE_PATH || url.pathname === DNF_PACK_PATH) {
+    if (
+      url.pathname === API_PATH ||
+      url.pathname === ROUTE_PATH ||
+      url.pathname === DNF_PACK_PATH ||
+      url.pathname === RANDOM_COURSE_LOOP_PATH
+    ) {
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('method not allowed', { status: 405 });
       }
@@ -583,6 +710,10 @@ export default {
         } else if (url.pathname === DNF_PACK_PATH) {
           response = await withEdgeCache(request, DNF_PACK_CACHE_TTL_S, () =>
             handleDnfPack(url, env)
+          );
+        } else if (url.pathname === RANDOM_COURSE_LOOP_PATH) {
+          response = await withEdgeCache(request, RANDOM_COURSE_CACHE_TTL_S, () =>
+            handleRandomCourseLoop(url, env)
           );
         } else {
           response = await withEdgeCache(request, SUPPLY_POINTS_CACHE_TTL_S, () =>
