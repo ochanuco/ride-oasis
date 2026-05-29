@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "ride-oasis" generated at 2026-05-25T13:00:42.300Z.
