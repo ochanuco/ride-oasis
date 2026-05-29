@@ -11,6 +11,9 @@ import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
 import dnfPackModule from './lib/cycling/dnf_pack.js';
 import loopCourseModule from './lib/cycling/loop_course.js';
+import chCsrModule from './lib/cycling/ch_csr.js';
+import chqueryCsrModule from './lib/cycling/chquery_csr.js';
+import snapCsrModule from './lib/cycling/snap_csr.js';
 // Rust WASM router. wasm-pack 標準の rust_router.js は `import * as wasm
 // from "./*.wasm"` の namespace-import を使い、Cloudflare Workers Builds
 // の bundler では受け付けられない。代わりに rust_router_worker.js が
@@ -29,7 +32,14 @@ const {
 const { TiledRouter } = tiledRouterModule;
 const { TileLoader, makeR2Fetcher } = tileLoaderModule;
 const { douglasPeucker, routeBBoxWithBuffer } = dnfPackModule;
-const { generateLoopCourses, DEFAULT_COUNT: LOOP_DEFAULT_COUNT } = loopCourseModule;
+const {
+  generateLoopCourses,
+  DEFAULT_COUNT: LOOP_DEFAULT_COUNT,
+  destinationPoint: loopDestinationPoint
+} = loopCourseModule;
+const { buildCsr } = chCsrModule;
+const { chQueryCsr, unpackChEdgeCsr } = chqueryCsrModule;
+const { snapCsr } = snapCsrModule;
 
 const API_PATH = '/api/supply-points';
 const ROUTE_PATH = '/api/route';
@@ -307,6 +317,83 @@ function neighborhoodKeysWasm(lon, lat, radius) {
 }
 
 const RANDOM_COURSE_CACHE_TTL_S = 5 * 60;
+const LOOP_SNAP_MAX_M = 500;
+
+/**
+ * loop 生成用: 1 変種（ループ 1 本）のループ領域に必要なタイルキーを列挙する。
+ * 円の中心は現在地から基準方位へ ρ ずらした位置。反復で ρ が伸びるぶんと、
+ * スナップ/道なりの膨らみぶんの余白を見込んで bbox を取る。
+ */
+function loopAreaTileKeys(center, bearingOffsetDeg, targetKm) {
+  const rho0 = targetKm / (2 * Math.PI);
+  const rhoMax = rho0 * 1.3; // 反復で半径が伸びるぶんの余裕
+  const marginKm = Math.max(2.5, rho0 * 0.2); // スナップ/道なり膨らみの余白
+  const reachKm = rhoMax + marginKm;
+  const circleMax = loopDestinationPoint(center, bearingOffsetDeg, rhoMax);
+  const latPad = reachKm / 111;
+  const cosLat = Math.cos((circleMax[1] * Math.PI) / 180);
+  const lonPad = reachKm / (111 * Math.max(0.2, Math.abs(cosLat)));
+  const x0 = Math.floor((circleMax[0] - lonPad) / TILE_DEG_WASM);
+  const x1 = Math.floor((circleMax[0] + lonPad) / TILE_DEG_WASM);
+  const y0 = Math.floor((circleMax[1] - latPad) / TILE_DEG_WASM);
+  const y1 = Math.floor((circleMax[1] + latPad) / TILE_DEG_WASM);
+  const keys = [];
+  for (let x = x0; x <= x1; x += 1) {
+    for (let y = y0; y <= y1; y += 1) keys.push(`${x}_${y}`);
+  }
+  return keys;
+}
+
+/** 構築済み CSR 上で 1 脚を解く（snap → chQuery → 座標展開）。/api/route の CSR-only と同等。 */
+function routeLegOnCsr(csr, from, to) {
+  const fromSnap = snapCsr(csr, from[0], from[1]);
+  const toSnap = snapCsr(csr, to[0], to[1]);
+  if (!fromSnap || fromSnap.distanceMeters > LOOP_SNAP_MAX_M) return { error: 'no_nearby_node_from' };
+  if (!toSnap || toSnap.distanceMeters > LOOP_SNAP_MAX_M) return { error: 'no_nearby_node_to' };
+  let rc = chQueryCsr(csr, fromSnap.idx, toSnap.idx, {
+    settledCap: 80000,
+    popsCap: 200000,
+    timeBudgetMs: 5000
+  });
+  if (!Number.isFinite(rc.distance)) {
+    rc = chQueryCsr(csr, fromSnap.idx, toSnap.idx, {
+      settledCap: 200000,
+      popsCap: 500000,
+      timeBudgetMs: 10000,
+      noLevelConstraint: true
+    });
+  }
+  if (!Number.isFinite(rc.distance)) return { error: 'unreachable_in_corridor' };
+  const expanded = [rc.pathIdx[0]];
+  for (let i = 1; i < rc.pathIdx.length; i += 1) {
+    unpackChEdgeCsr(csr, rc.pathIdx[i - 1], rc.pathIdx[i], expanded);
+  }
+  const coordinates = [];
+  for (let i = 0; i < expanded.length; i += 1) {
+    const idx = expanded[i];
+    const lon = csr.lons[idx];
+    const lat = csr.lats[idx];
+    if (lon === lon && lat === lat) coordinates.push([lon, lat]); // NaN skip
+  }
+  return { coordinates };
+}
+
+/**
+ * 変種ごとに領域 CSR を 1 回だけ build し、その上で脚を解く routeLeg を返す
+ * factory。CSR は返した closure に閉じ込めるので、変種が終われば GC 対象になる
+ * （= ピークメモリが 1 変種ぶんで収まり、WASM のような累積増加が起きない）。
+ */
+function makeLoopRouteLegFactory(loader) {
+  return async ({ center, targetKm, bearingOffsetDeg }) => {
+    const keys = loopAreaTileKeys(center, bearingOffsetDeg, targetKm);
+    const bufs = await loader.loadBuffers(keys);
+    if (!bufs || bufs.length === 0) {
+      throw new Error('no tiles for loop area');
+    }
+    const csr = buildCsr(bufs);
+    return async (from, to) => routeLegOnCsr(csr, from, to);
+  };
+}
 
 /**
  * 現在地を中心に、総距離が km（最大 160km）の周回ルートを n 本（既定 3、
@@ -362,21 +449,16 @@ async function handleRandomCourseLoop(url, env) {
     throw err;
   }
 
-  // 1 脚を JS の TiledRouter(CSR-only) で解く。WASM(route_ch) は linear memory
-  // が呼び出しごとに増えるだけで縮まないため、数十脚を逐次に解くと 128MB の
-  // Workers メモリ上限を超えて 1102(exceededMemory) になる。JS 版は corridor
-  // ごとに CSR を作って捨てる（GC で回収される）ので、ピークメモリが 1 脚ぶん
-  // に収まる。CPU 上限は 30s あるため速度より安全側を採る。
-  const router = new TiledRouter(loader, { csrOnly: true });
-  const routeLeg = async (from, to) => {
-    const r = await router.route(from[0], from[1], to[0], to[1]);
-    if (!r || r.error) {
-      return { error: r ? r.error : 'route_failed' };
-    }
-    return { coordinates: r.coordinates };
-  };
+  // 変種（ループ 1 本）ごとに、そのループ領域ぶんのタイルから CSR を 1 回だけ
+  // build し、全反復・全脚をその CSR 上で snap+chQuery して解く。
+  //
+  // なぜ: 脚ごとに WASM route_ch を呼ぶと linear memory が増え続けて 128MB を
+  // 超え 1102(exceededMemory) になる。脚ごとに JS CSR を作り直すのも、数十回の
+  // build で CPU を浪費する（40km/2 本で実測 ~33s）。領域 CSR を変種あたり 1 個
+  // にすることで build は本数ぶん（3 回程度）に減り、メモリも 1 変種ぶんで収まる。
+  const routeLegFactory = makeLoopRouteLegFactory(loader);
 
-  const result = await generateLoopCourses(center, km, n, routeLeg);
+  const result = await generateLoopCourses(center, km, n, null, { routeLegFactory });
   if (!result.courses.length) {
     return Response.json(
       {

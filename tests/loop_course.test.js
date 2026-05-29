@@ -126,6 +126,28 @@ test('generateLoopCourses: 全脚が失敗する routeLeg では 0 本を返す'
   assert.equal(out.courses.length, 0);
 });
 
+test('generateLoopCourses: routeLegFactory が変種ごとに 1 回だけ呼ばれる', async () => {
+  let factoryCalls = 0;
+  const routeLegFactory = async ({ bearingOffsetDeg }) => {
+    factoryCalls += 1;
+    // 変種ごとの routeLeg。bearingOffsetDeg を見て変種を区別できる。
+    assert.equal(typeof bearingOffsetDeg, 'number');
+    return straightLineRouteLeg();
+  };
+  const out = await generateLoopCourses(CENTER, 60, 3, null, { routeLegFactory });
+  assert.equal(out.courses.length, 3);
+  // 予備候補を使わずに済めば本数ぶん（3 回）だけ factory が呼ばれる。
+  assert.equal(factoryCalls, 3);
+});
+
+test('generateLoopCourses: factory が throw した変種は捨てられる', async () => {
+  const routeLegFactory = async () => {
+    throw new Error('csr build failed');
+  };
+  const out = await generateLoopCourses(CENTER, 40, 3, null, { routeLegFactory });
+  assert.equal(out.courses.length, 0);
+});
+
 test('clampNumber/clampInt: 異常値は fallback / 範囲内に倒す', () => {
   assert.equal(clampNumber('abc', 1, 160, 1), 1, 'NaN は fallback');
   assert.equal(clampNumber(200, 1, 160, 1), 160, '上限クランプ');
