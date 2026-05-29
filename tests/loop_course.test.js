@@ -16,7 +16,7 @@ const {
   clampInt,
   MAX_TARGET_KM,
   MAX_LEG_KM
-} = require('../lib/cycling/loop_course.js');
+} = require('../frontend/loop_course.js');
 
 // 大阪駅付近を中心に使う（任意の地点で良い）。
 const CENTER = [135.4959, 34.7024];

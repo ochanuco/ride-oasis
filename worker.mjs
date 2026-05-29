@@ -10,7 +10,6 @@ import mapData from './lib/map_data.js';
 import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
 import dnfPackModule from './lib/cycling/dnf_pack.js';
-import loopCourseModule from './lib/cycling/loop_course.js';
 // Rust WASM router. wasm-pack 標準の rust_router.js は `import * as wasm
 // from "./*.wasm"` の namespace-import を使い、Cloudflare Workers Builds
 // の bundler では受け付けられない。代わりに rust_router_worker.js が
@@ -29,19 +28,10 @@ const {
 const { TiledRouter } = tiledRouterModule;
 const { TileLoader, makeR2Fetcher } = tileLoaderModule;
 const { douglasPeucker, routeBBoxWithBuffer } = dnfPackModule;
-const {
-  generateLoopCourse,
-  clampNumber: loopClampNumber,
-  MIN_TARGET_KM: LOOP_MIN_KM,
-  MAX_TARGET_KM: LOOP_MAX_KM
-} = loopCourseModule;
 
 const API_PATH = '/api/supply-points';
 const ROUTE_PATH = '/api/route';
 const DNF_PACK_PATH = '/api/dnf-pack';
-// random-course 名前空間: 現在地からの自動コース生成。将来 /landmark なども
-// 同じ prefix にぶら下げる想定。
-const RANDOM_COURSE_LOOP_PATH = '/api/random-course/loop';
 
 // Per-isolate tile loader cache. Tiles loaded from R2 are reused across
 // requests in the same isolate so repeat queries in the same city are cheap.
@@ -309,123 +299,6 @@ function neighborhoodKeysWasm(lon, lat, radius) {
     }
   }
   return out;
-}
-
-const RANDOM_COURSE_CACHE_TTL_S = 5 * 60;
-const LOOP_MAX_ITERATIONS = 2;
-
-/**
- * 現在地を中心に、総距離が km（最大 160km）の周回ルートを 1 本生成して返す。
- * 出発点付近に戻ってくる真の周回ループ。
- *
- * リクエスト: ?center=lon,lat&km=120[&bearing=0][&dir=cw|ccw]
- *
- * 1 リクエスト = 1 ループにしている理由:
- *  - Workers は 1 isolate あたり 128MB。広域ループ（100km 超）はグラフが大きく、
- *    1 リクエストで複数本ぶんの CSR を扱うと 1102(exceededMemory) になる。
- *  - 本数（2〜3 本）はフロントが bearing/dir を変えて並列リクエストする。各本が
- *    別 isolate で独立した 128MB/30s 予算を持つため、負荷が分散する。
- *
- * 各脚は /api/route と同じ JS TiledRouter(CSR-only) で解く。corridor ごとに小さな
- * CSR を作って捨てる（GC 回収）ので、1 リクエストのピークメモリは 1 脚ぶんに収まる。
- *
- * 戻り: GeoJSON FeatureCollection（features は 1 本）。
- */
-async function handleRandomCourseLoop(url, env) {
-  const center = parseLonLat(url.searchParams.get('center'));
-  if (!center) {
-    return Response.json(
-      { error: 'center must be in "lon,lat" form' },
-      { status: 400 }
-    );
-  }
-  const kmRaw = String(url.searchParams.get('km') ?? '').trim();
-  const kmNum = Number(kmRaw);
-  if (kmRaw === '' || !Number.isFinite(kmNum) || kmNum <= 0) {
-    return Response.json(
-      { error: 'km must be a positive number' },
-      { status: 400 }
-    );
-  }
-  const km = loopClampNumber(kmNum, LOOP_MIN_KM, LOOP_MAX_KM, LOOP_MIN_KM);
-
-  let bearing = 0;
-  const bRaw = url.searchParams.get('bearing');
-  if (bRaw != null && String(bRaw).trim() !== '') {
-    const b = Number(bRaw);
-    if (!Number.isFinite(b)) {
-      return Response.json({ error: 'bearing must be a number' }, { status: 400 });
-    }
-    bearing = ((b % 360) + 360) % 360;
-  }
-  const direction = (url.searchParams.get('dir') || 'cw').toLowerCase() === 'ccw' ? -1 : 1;
-
-  let loader;
-  try {
-    loader = ensureTileLoader(env);
-  } catch (err) {
-    if (err && err.code === 'no_graph_binding') {
-      return Response.json({ error: err.message }, { status: 503 });
-    }
-    throw err;
-  }
-
-  // 1 脚を JS TiledRouter(CSR-only) で解く。corridor ごとに CSR を作って捨てる
-  // ためメモリは 1 脚ぶんで頭打ち（WASM route_ch のような linear memory の累積
-  // 増加が起きない）。router インスタンスは脚間で使い回す。
-  const router = new TiledRouter(loader, { csrOnly: true });
-  const routeLeg = async (from, to) => {
-    const r = await router.route(from[0], from[1], to[0], to[1]);
-    if (!r || r.error) {
-      return { error: r ? r.error : 'route_failed' };
-    }
-    return { coordinates: r.coordinates };
-  };
-
-  const course = await generateLoopCourse(
-    center,
-    km,
-    { bearingOffsetDeg: bearing, direction, maxIterations: LOOP_MAX_ITERATIONS },
-    routeLeg
-  );
-  if (!course) {
-    return Response.json(
-      {
-        error: 'no_course_generated',
-        detail: 'could not build a loop in the covered area'
-      },
-      { status: 422 }
-    );
-  }
-
-  const round2 = (v) => Math.round(v * 100) / 100;
-  const feature = {
-    type: 'Feature',
-    geometry: { type: 'LineString', coordinates: course.coordinates },
-    properties: {
-      distance_km: round2(course.distanceKm),
-      target_km: km,
-      error_ratio: Math.round(course.errRatio * 1000) / 1000,
-      converged: !!course.converged,
-      bearing_offset_deg: course.bearingOffsetDeg,
-      direction: course.direction === 1 ? 'cw' : 'ccw',
-      iterations: course.iterations
-    }
-  };
-
-  return Response.json(
-    {
-      type: 'FeatureCollection',
-      features: [feature],
-      meta: { center, target_km: km }
-    },
-    {
-      headers: {
-        'content-type': 'application/geo+json; charset=utf-8',
-        'cache-control': `public, max-age=${RANDOM_COURSE_CACHE_TTL_S}`
-      }
-    }
-  );
 }
 
 /**
@@ -697,12 +570,7 @@ export default {
    */
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (
-      url.pathname === API_PATH ||
-      url.pathname === ROUTE_PATH ||
-      url.pathname === DNF_PACK_PATH ||
-      url.pathname === RANDOM_COURSE_LOOP_PATH
-    ) {
+    if (url.pathname === API_PATH || url.pathname === ROUTE_PATH || url.pathname === DNF_PACK_PATH) {
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return new Response('method not allowed', { status: 405 });
       }
@@ -715,10 +583,6 @@ export default {
         } else if (url.pathname === DNF_PACK_PATH) {
           response = await withEdgeCache(request, DNF_PACK_CACHE_TTL_S, () =>
             handleDnfPack(url, env)
-          );
-        } else if (url.pathname === RANDOM_COURSE_LOOP_PATH) {
-          response = await withEdgeCache(request, RANDOM_COURSE_CACHE_TTL_S, () =>
-            handleRandomCourseLoop(url, env)
           );
         } else {
           response = await withEdgeCache(request, SUPPLY_POINTS_CACHE_TTL_S, () =>
