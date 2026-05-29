@@ -6,6 +6,9 @@ const assert = require('node:assert/strict');
 const {
   generateLoopCourses,
   generateLoopCourse,
+  generateExtendedCourse,
+  petalCountFor,
+  SINGLE_LOOP_MAX_KM,
   haversineKm,
   destinationPoint,
   polylineLengthKm,
@@ -146,6 +149,43 @@ test('generateLoopCourses: factory が throw した変種は捨てられる', as
   };
   const out = await generateLoopCourses(CENTER, 40, 3, null, { routeLegFactory });
   assert.equal(out.courses.length, 0);
+});
+
+test('petalCountFor: 距離が大きいほど花びら枚数が増える', () => {
+  assert.equal(petalCountFor(60), 1, '小さい距離は単一ループ');
+  assert.equal(petalCountFor(SINGLE_LOOP_MAX_KM), 1, '閾値ちょうどは 1 枚');
+  assert.ok(petalCountFor(160) >= 2, '160km は複数花びら');
+});
+
+test('generateExtendedCourse: 小距離は単一ループ（petals 未設定 or 1）', async () => {
+  const r = await generateExtendedCourse(CENTER, 40, {}, straightLineRouteLeg());
+  assert.ok(r, '結果が返る');
+  assert.ok(!r.petals || r.petals === 1, '単一ループ');
+  assert.ok(Math.abs(r.distanceKm - 40) / 40 <= 0.1, '目標近傍');
+});
+
+test('generateExtendedCourse: 160km は複数花びらで総距離が目標に収束する', async () => {
+  const r = await generateExtendedCourse(CENTER, 160, {}, straightLineRouteLeg());
+  assert.ok(r, '結果が返る');
+  assert.ok(r.petals >= 2, `複数花びら: ${r.petals}`);
+  assert.ok(Math.abs(r.distanceKm - 160) / 160 <= 0.1, `総距離が目標近傍: ${r.distanceKm}`);
+});
+
+test('generateExtendedCourse: 花びら型でも始点・終点が中心に戻る', async () => {
+  const r = await generateExtendedCourse(CENTER, 160, {}, straightLineRouteLeg());
+  const start = r.coordinates[0];
+  const end = r.coordinates[r.coordinates.length - 1];
+  assert.ok(haversineKm(start, CENTER) < 0.1, '始点が中心');
+  assert.ok(haversineKm(end, CENTER) < 5, `終点が出発点付近: ${haversineKm(end, CENTER)}km`);
+});
+
+test('generateExtendedCourse: 花びらの最大到達距離は単一円より小さい', async () => {
+  // 同じ 160km を、単一円ループ(参考)と花びらで比べると、花びらの方が中心から
+  // 遠ざからない（被覆内に収めやすい）。
+  const petal = await generateExtendedCourse(CENTER, 160, {}, straightLineRouteLeg());
+  const maxReachKm = Math.max(...petal.coordinates.map((c) => haversineKm(CENTER, c)));
+  // 単一円ループの最大到達は直径相当 ≈ 160/π/... ≈ 50km。花びらはその半分以下。
+  assert.ok(maxReachKm < 30, `花びらの最大到達が小さい: ${maxReachKm.toFixed(1)}km`);
 });
 
 test('clampNumber/clampInt: 異常値は fallback / 範囲内に倒す', () => {

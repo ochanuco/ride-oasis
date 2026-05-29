@@ -47,6 +47,13 @@
   // ぶん小さめに置くと、ρ *= target/total の補正が少回数で収束する。
   const INITIAL_RADIUS_FACTOR = 0.82;
   const MIN_VERTEX_COUNT = 6;
+  // 1 本の円ループはこの距離を超えると直径（≈ km/π）が大きくなりすぎて、海・山・
+  // データ被覆端に当たって生成できない方位が増える。これを超える総距離は「花びら
+  // (petal)」に分割し、中心から小さめのループを複数方向に出して中心で繋ぐ
+  // （クローバー状）。中心からの最大距離を小さく保ったまま総距離を伸ばせる。
+  const SINGLE_LOOP_MAX_KM = 70;
+  // petal が割り当て方位で作れないとき、方位を回して再挑戦する順序（度）。
+  const PETAL_BEARING_JITTERS = [0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180];
 
   function toRad(deg) {
     return (deg * Math.PI) / 180;
@@ -253,6 +260,68 @@
     return best;
   }
 
+  /** 総距離 targetKm を何枚の花びらに分けるか（1 枚 = 単一円ループ）。 */
+  function petalCountFor(targetKm) {
+    return Math.max(1, Math.ceil(targetKm / SINGLE_LOOP_MAX_KM));
+  }
+
+  /**
+   * 総距離 targetKm の周回ルートを 1 本生成する。targetKm が大きいときは複数の
+   * 花びら（petal）に分割し、中心から各方位へ小ループを出して中心で繋ぐ
+   * （クローバー状）。各 petal は中心↔中心の小ループで、繋ぐと出発点に戻る。
+   * 花びらにすることで中心からの最大距離を小さく保て、被覆内で長距離を作れる。
+   * targetKm が小さい場合は従来どおり単一の円ループ。
+   */
+  async function generateExtendedCourse(center, targetKm, opts, routeLeg) {
+    const o = opts || {};
+    const petals = petalCountFor(targetKm);
+    if (petals === 1) {
+      return generateLoopCourse(center, targetKm, o, routeLeg);
+    }
+    const { bearingOffsetDeg = 0, direction = 1, tolerance = DEFAULT_TOLERANCE } = o;
+    const petalKm = targetKm / petals;
+    const step = 360 / petals;
+    const coordsAll = [];
+    let total = 0;
+    const used = [];
+
+    for (let k = 0; k < petals; k += 1) {
+      let petal = null;
+      // 割り当て方位で作れなければ方位を回してリトライ（海・山方向を避ける）。
+      for (const jitter of PETAL_BEARING_JITTERS) {
+        const b = bearingOffsetDeg + step * k + jitter;
+        // eslint-disable-next-line no-await-in-loop
+        petal = await generateLoopCourse(center, petalKm, { ...o, bearingOffsetDeg: b, direction }, routeLeg);
+        if (petal) {
+          used.push(((b % 360) + 360) % 360);
+          break;
+        }
+      }
+      if (!petal) return null; // どの方位でもこの petal を作れない地点 → 変種失敗
+      const c = petal.coordinates;
+      if (coordsAll.length === 0) {
+        for (let i = 0; i < c.length; i += 1) coordsAll.push(c[i]);
+      } else {
+        // 直前の petal 終端と今 petal 始点はどちらも中心なので 1 個飛ばし
+        for (let i = 1; i < c.length; i += 1) coordsAll.push(c[i]);
+      }
+      total += petal.distanceKm;
+    }
+
+    const errRatio = targetKm > 0 ? Math.abs(total - targetKm) / targetKm : Infinity;
+    return {
+      coordinates: coordsAll,
+      distanceKm: total,
+      errRatio,
+      converged: errRatio <= tolerance,
+      bearingOffsetDeg,
+      direction,
+      iterations: petals,
+      petals,
+      petalBearings: used
+    };
+  }
+
   /**
    * 周回ルートを count 本生成する。基準方位を 360/count ずつ回転し、周回方向を
    * 交互に振って作り分ける。失敗に備えて余分な候補（半ステップずらし）を用意し、
@@ -278,7 +347,7 @@
       });
     }
 
-    const run = (c) => generateLoopCourse(center, tgt, { ...cfg, ...c }, routeLeg);
+    const run = (c) => generateExtendedCourse(center, tgt, { ...cfg, ...c }, routeLeg);
 
     // まず本命を並列実行。足りなければ予備を足す。
     let courses = (await Promise.all(primary.map(run))).filter(Boolean);
@@ -298,6 +367,8 @@
   return {
     generateLoopCourses,
     generateLoopCourse,
+    generateExtendedCourse,
+    petalCountFor,
     haversineKm,
     destinationPoint,
     polylineLengthKm,
@@ -313,6 +384,7 @@
     MAX_COUNT,
     MIN_COUNT,
     MAX_LEG_KM,
-    DEFAULT_TOLERANCE
+    DEFAULT_TOLERANCE,
+    SINGLE_LOOP_MAX_KM
   };
 });

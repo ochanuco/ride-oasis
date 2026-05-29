@@ -2627,7 +2627,7 @@ async function handleGenerateLoop() {
       const direction = i % 2 === 0 ? 1 : -1;
       tasks.push(
         window.LoopCourse
-          .generateLoopCourse(center, km, { bearingOffsetDeg, direction }, routeLeg)
+          .generateExtendedCourse(center, km, { bearingOffsetDeg, direction }, routeLeg)
           .then((course) => {
             if (loadToken !== latestRouteLoadToken || !course) return;
             loopCandidates.push({
