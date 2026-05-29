@@ -2589,36 +2589,51 @@ async function handleGenerateLoop() {
     loopCenter = center;
     manualPoints = [];
     setStatus(`周回ルートを生成中... (${km}km × ${n}本)`);
-    const qs = new URLSearchParams({
-      center: `${center[0]},${center[1]}`,
-      km: String(km),
-      n: String(n)
-    });
-    const res = await fetch(`${API_BASE}/random-course/loop?${qs.toString()}`);
-    if (loadToken !== latestRouteLoadToken) return;
-    if (!res.ok) {
-      let detail = '';
-      try {
-        const j = await res.json();
-        detail = j.detail || j.error || '';
-      } catch (_) { /* ignore parse error */ }
-      setStatus(detail ? `生成に失敗しました: ${detail}` : '周回ルートの生成に失敗しました');
-      return;
+    // 1 本 = 1 リクエスト。bearing を 360/n ずつ回し、周回方向を交互にして
+    // 別ルートにする。各リクエストは別 isolate で独立予算を持つので並列化で
+    // 広域 (160km) でも 1 isolate の 128MB/30s に収まる。
+    const requests = [];
+    for (let i = 0; i < n; i += 1) {
+      const bearing = Math.round((360 / n) * i);
+      const dir = i % 2 === 0 ? 'cw' : 'ccw';
+      const qs = new URLSearchParams({
+        center: `${center[0]},${center[1]}`,
+        km: String(km),
+        bearing: String(bearing),
+        dir
+      });
+      requests.push(
+        fetch(`${API_BASE}/random-course/loop?${qs.toString()}`)
+          .then(async (res) => {
+            if (!res.ok) return null;
+            const fc = await res.json();
+            const f = (fc.features || [])[0];
+            if (!f || !Array.isArray(f.geometry?.coordinates) || f.geometry.coordinates.length < 2) {
+              return null;
+            }
+            return {
+              coordinates: f.geometry.coordinates,
+              distanceKm: f.properties?.distance_km,
+              direction: f.properties?.direction,
+              converged: f.properties?.converged
+            };
+          })
+          .catch(() => null)
+      );
     }
-    const fc = await res.json();
+    const settled = await Promise.all(requests);
     if (loadToken !== latestRouteLoadToken) return;
-    const candidates = (fc.features || [])
-      .map((f) => ({
-        coordinates: f.geometry?.coordinates,
-        distanceKm: f.properties?.distance_km,
-        direction: f.properties?.direction,
-        converged: f.properties?.converged
-      }))
-      .filter((c) => Array.isArray(c.coordinates) && c.coordinates.length >= 2);
+    const candidates = settled.filter(Boolean);
     if (candidates.length === 0) {
       setStatus('この地点では周回ルートを生成できませんでした (地図データ範囲外の可能性)');
       return;
     }
+    // 目標に近い順に並べる（コース番号が安定するよう距離誤差で整列）。
+    candidates.sort((a, b) => {
+      const ea = Math.abs((a.distanceKm ?? Infinity) - km);
+      const eb = Math.abs((b.distanceKm ?? Infinity) - km);
+      return ea - eb;
+    });
     loopCandidates = candidates;
     selectedLoopIndex = -1;
     renderLoopCandidates();

@@ -11,9 +11,6 @@ import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
 import dnfPackModule from './lib/cycling/dnf_pack.js';
 import loopCourseModule from './lib/cycling/loop_course.js';
-import chCsrModule from './lib/cycling/ch_csr.js';
-import chqueryCsrModule from './lib/cycling/chquery_csr.js';
-import snapCsrModule from './lib/cycling/snap_csr.js';
 // Rust WASM router. wasm-pack 標準の rust_router.js は `import * as wasm
 // from "./*.wasm"` の namespace-import を使い、Cloudflare Workers Builds
 // の bundler では受け付けられない。代わりに rust_router_worker.js が
@@ -33,13 +30,11 @@ const { TiledRouter } = tiledRouterModule;
 const { TileLoader, makeR2Fetcher } = tileLoaderModule;
 const { douglasPeucker, routeBBoxWithBuffer } = dnfPackModule;
 const {
-  generateLoopCourses,
-  DEFAULT_COUNT: LOOP_DEFAULT_COUNT,
-  destinationPoint: loopDestinationPoint
+  generateLoopCourse,
+  clampNumber: loopClampNumber,
+  MIN_TARGET_KM: LOOP_MIN_KM,
+  MAX_TARGET_KM: LOOP_MAX_KM
 } = loopCourseModule;
-const { buildCsr } = chCsrModule;
-const { chQueryCsr, unpackChEdgeCsr } = chqueryCsrModule;
-const { snapCsr } = snapCsrModule;
 
 const API_PATH = '/api/supply-points';
 const ROUTE_PATH = '/api/route';
@@ -317,98 +312,24 @@ function neighborhoodKeysWasm(lon, lat, radius) {
 }
 
 const RANDOM_COURSE_CACHE_TTL_S = 5 * 60;
-const LOOP_SNAP_MAX_M = 500;
+const LOOP_MAX_ITERATIONS = 2;
 
 /**
- * loop 生成用: 1 変種（ループ 1 本）のループ領域に必要なタイルキーを列挙する。
- * 円の中心は現在地から基準方位へ ρ ずらした位置。反復で ρ が伸びるぶんと、
- * スナップ/道なりの膨らみぶんの余白を見込んで bbox を取る。
- */
-function loopAreaTileKeys(center, bearingOffsetDeg, targetKm) {
-  const rho0 = targetKm / (2 * Math.PI);
-  const rhoMax = rho0 * 1.3; // 反復で半径が伸びるぶんの余裕
-  const marginKm = Math.max(2.5, rho0 * 0.2); // スナップ/道なり膨らみの余白
-  const reachKm = rhoMax + marginKm;
-  const circleMax = loopDestinationPoint(center, bearingOffsetDeg, rhoMax);
-  const latPad = reachKm / 111;
-  const cosLat = Math.cos((circleMax[1] * Math.PI) / 180);
-  const lonPad = reachKm / (111 * Math.max(0.2, Math.abs(cosLat)));
-  const x0 = Math.floor((circleMax[0] - lonPad) / TILE_DEG_WASM);
-  const x1 = Math.floor((circleMax[0] + lonPad) / TILE_DEG_WASM);
-  const y0 = Math.floor((circleMax[1] - latPad) / TILE_DEG_WASM);
-  const y1 = Math.floor((circleMax[1] + latPad) / TILE_DEG_WASM);
-  const keys = [];
-  for (let x = x0; x <= x1; x += 1) {
-    for (let y = y0; y <= y1; y += 1) keys.push(`${x}_${y}`);
-  }
-  return keys;
-}
-
-/** 構築済み CSR 上で 1 脚を解く（snap → chQuery → 座標展開）。/api/route の CSR-only と同等。 */
-function routeLegOnCsr(csr, from, to) {
-  const fromSnap = snapCsr(csr, from[0], from[1]);
-  const toSnap = snapCsr(csr, to[0], to[1]);
-  if (!fromSnap || fromSnap.distanceMeters > LOOP_SNAP_MAX_M) return { error: 'no_nearby_node_from' };
-  if (!toSnap || toSnap.distanceMeters > LOOP_SNAP_MAX_M) return { error: 'no_nearby_node_to' };
-  let rc = chQueryCsr(csr, fromSnap.idx, toSnap.idx, {
-    settledCap: 80000,
-    popsCap: 200000,
-    timeBudgetMs: 5000
-  });
-  if (!Number.isFinite(rc.distance)) {
-    rc = chQueryCsr(csr, fromSnap.idx, toSnap.idx, {
-      settledCap: 200000,
-      popsCap: 500000,
-      timeBudgetMs: 10000,
-      noLevelConstraint: true
-    });
-  }
-  if (!Number.isFinite(rc.distance)) return { error: 'unreachable_in_corridor' };
-  const expanded = [rc.pathIdx[0]];
-  for (let i = 1; i < rc.pathIdx.length; i += 1) {
-    unpackChEdgeCsr(csr, rc.pathIdx[i - 1], rc.pathIdx[i], expanded);
-  }
-  const coordinates = [];
-  for (let i = 0; i < expanded.length; i += 1) {
-    const idx = expanded[i];
-    const lon = csr.lons[idx];
-    const lat = csr.lats[idx];
-    if (lon === lon && lat === lat) coordinates.push([lon, lat]); // NaN skip
-  }
-  return { coordinates };
-}
-
-/**
- * 変種ごとに領域 CSR を 1 回だけ build し、その上で脚を解く routeLeg を返す
- * factory。CSR は返した closure に閉じ込めるので、変種が終われば GC 対象になる
- * （= ピークメモリが 1 変種ぶんで収まり、WASM のような累積増加が起きない）。
- */
-function makeLoopRouteLegFactory(loader) {
-  return async ({ center, targetKm, bearingOffsetDeg }) => {
-    const keys = loopAreaTileKeys(center, bearingOffsetDeg, targetKm);
-    const bufs = await loader.loadBuffers(keys);
-    if (!bufs || bufs.length === 0) {
-      throw new Error('no tiles for loop area');
-    }
-    const csr = buildCsr(bufs);
-    return async (from, to) => routeLegOnCsr(csr, from, to);
-  };
-}
-
-/**
- * 現在地を中心に、総距離が km（最大 160km）の周回ルートを n 本（既定 3、
- * 最大 3）自動生成して返す。出発点付近に戻ってくる真の周回ループ。
+ * 現在地を中心に、総距離が km（最大 160km）の周回ルートを 1 本生成して返す。
+ * 出発点付近に戻ってくる真の周回ループ。
  *
- * リクエスト: ?center=lon,lat&km=120[&n=3]
+ * リクエスト: ?center=lon,lat&km=120[&bearing=0][&dir=cw|ccw]
  *
- * 処理:
- *  1) lib/cycling/loop_course.generateLoopCourses に routeLeg を注入
- *  2) routeLeg は /api/route と同じ WASM(route_ch) → JS フォールバックで
- *     2 点間を結ぶ
- *  3) 円周配置 → 脚ルーティング → 距離計測 → 半径補正の反復で目標 ±10% に
- *     寄せる。方位回転＋周回方向で作り分け。
+ * 1 リクエスト = 1 ループにしている理由:
+ *  - Workers は 1 isolate あたり 128MB。広域ループ（100km 超）はグラフが大きく、
+ *    1 リクエストで複数本ぶんの CSR を扱うと 1102(exceededMemory) になる。
+ *  - 本数（2〜3 本）はフロントが bearing/dir を変えて並列リクエストする。各本が
+ *    別 isolate で独立した 128MB/30s 予算を持つため、負荷が分散する。
  *
- * 戻り: GeoJSON FeatureCollection（各 Feature が 1 本のループ）。
+ * 各脚は /api/route と同じ JS TiledRouter(CSR-only) で解く。corridor ごとに小さな
+ * CSR を作って捨てる（GC 回収）ので、1 リクエストのピークメモリは 1 脚ぶんに収まる。
+ *
+ * 戻り: GeoJSON FeatureCollection（features は 1 本）。
  */
 async function handleRandomCourseLoop(url, env) {
   const center = parseLonLat(url.searchParams.get('center'));
@@ -419,25 +340,25 @@ async function handleRandomCourseLoop(url, env) {
     );
   }
   const kmRaw = String(url.searchParams.get('km') ?? '').trim();
-  const km = Number(kmRaw);
-  if (kmRaw === '' || !Number.isFinite(km) || km <= 0) {
+  const kmNum = Number(kmRaw);
+  if (kmRaw === '' || !Number.isFinite(kmNum) || kmNum <= 0) {
     return Response.json(
       { error: 'km must be a positive number' },
       { status: 400 }
     );
   }
-  let n = LOOP_DEFAULT_COUNT;
-  const nRaw = url.searchParams.get('n');
-  if (nRaw != null && String(nRaw).trim() !== '') {
-    const ni = Number(nRaw);
-    if (!Number.isFinite(ni) || ni < 1) {
-      return Response.json(
-        { error: 'n must be a positive integer' },
-        { status: 400 }
-      );
+  const km = loopClampNumber(kmNum, LOOP_MIN_KM, LOOP_MAX_KM, LOOP_MIN_KM);
+
+  let bearing = 0;
+  const bRaw = url.searchParams.get('bearing');
+  if (bRaw != null && String(bRaw).trim() !== '') {
+    const b = Number(bRaw);
+    if (!Number.isFinite(b)) {
+      return Response.json({ error: 'bearing must be a number' }, { status: 400 });
     }
-    n = ni;
+    bearing = ((b % 360) + 360) % 360;
   }
+  const direction = (url.searchParams.get('dir') || 'cw').toLowerCase() === 'ccw' ? -1 : 1;
 
   let loader;
   try {
@@ -449,52 +370,54 @@ async function handleRandomCourseLoop(url, env) {
     throw err;
   }
 
-  // 変種（ループ 1 本）ごとに、そのループ領域ぶんのタイルから CSR を 1 回だけ
-  // build し、全反復・全脚をその CSR 上で snap+chQuery して解く。
-  //
-  // なぜ: 脚ごとに WASM route_ch を呼ぶと linear memory が増え続けて 128MB を
-  // 超え 1102(exceededMemory) になる。脚ごとに JS CSR を作り直すのも、数十回の
-  // build で CPU を浪費する（40km/2 本で実測 ~33s）。領域 CSR を変種あたり 1 個
-  // にすることで build は本数ぶん（3 回程度）に減り、メモリも 1 変種ぶんで収まる。
-  const routeLegFactory = makeLoopRouteLegFactory(loader);
+  // 1 脚を JS TiledRouter(CSR-only) で解く。corridor ごとに CSR を作って捨てる
+  // ためメモリは 1 脚ぶんで頭打ち（WASM route_ch のような linear memory の累積
+  // 増加が起きない）。router インスタンスは脚間で使い回す。
+  const router = new TiledRouter(loader, { csrOnly: true });
+  const routeLeg = async (from, to) => {
+    const r = await router.route(from[0], from[1], to[0], to[1]);
+    if (!r || r.error) {
+      return { error: r ? r.error : 'route_failed' };
+    }
+    return { coordinates: r.coordinates };
+  };
 
-  const result = await generateLoopCourses(center, km, n, null, { routeLegFactory });
-  if (!result.courses.length) {
+  const course = await generateLoopCourse(
+    center,
+    km,
+    { bearingOffsetDeg: bearing, direction, maxIterations: LOOP_MAX_ITERATIONS },
+    routeLeg
+  );
+  if (!course) {
     return Response.json(
       {
         error: 'no_course_generated',
-        detail: 'could not build any loop in the covered area'
+        detail: 'could not build a loop in the covered area'
       },
       { status: 422 }
     );
   }
 
   const round2 = (v) => Math.round(v * 100) / 100;
-  const features = result.courses.map((c, i) => ({
+  const feature = {
     type: 'Feature',
-    geometry: { type: 'LineString', coordinates: c.coordinates },
+    geometry: { type: 'LineString', coordinates: course.coordinates },
     properties: {
-      index: i,
-      distance_km: round2(c.distanceKm),
-      target_km: result.target_km,
-      error_ratio: Math.round(c.errRatio * 1000) / 1000,
-      converged: !!c.converged,
-      bearing_offset_deg: c.bearingOffsetDeg,
-      direction: c.direction === 1 ? 'cw' : 'ccw',
-      iterations: c.iterations
+      distance_km: round2(course.distanceKm),
+      target_km: km,
+      error_ratio: Math.round(course.errRatio * 1000) / 1000,
+      converged: !!course.converged,
+      bearing_offset_deg: course.bearingOffsetDeg,
+      direction: course.direction === 1 ? 'cw' : 'ccw',
+      iterations: course.iterations
     }
-  }));
+  };
 
   return Response.json(
     {
       type: 'FeatureCollection',
-      features,
-      meta: {
-        center,
-        target_km: result.target_km,
-        requested: result.requested,
-        returned: features.length
-      }
+      features: [feature],
+      meta: { center, target_km: km }
     },
     {
       headers: {
