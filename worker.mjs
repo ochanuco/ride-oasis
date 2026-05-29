@@ -362,14 +362,14 @@ async function handleRandomCourseLoop(url, env) {
     throw err;
   }
 
-  // 1 脚を /api/route と同じ経路で解く。WASM(route_ch) → 失敗時 JS CSR-only。
+  // 1 脚を JS の TiledRouter(CSR-only) で解く。WASM(route_ch) は linear memory
+  // が呼び出しごとに増えるだけで縮まないため、数十脚を逐次に解くと 128MB の
+  // Workers メモリ上限を超えて 1102(exceededMemory) になる。JS 版は corridor
+  // ごとに CSR を作って捨てる（GC で回収される）ので、ピークメモリが 1 脚ぶん
+  // に収まる。CPU 上限は 30s あるため速度より安全側を採る。
+  const router = new TiledRouter(loader, { csrOnly: true });
   const routeLeg = async (from, to) => {
-    const wasm = await tryWasmRoute(loader, from, to);
-    let r = wasm;
-    if (!r) {
-      const router = new TiledRouter(loader, { csrOnly: true });
-      r = await router.route(from[0], from[1], to[0], to[1]);
-    }
+    const r = await router.route(from[0], from[1], to[0], to[1]);
     if (!r || r.error) {
       return { error: r ? r.error : 'route_failed' };
     }
