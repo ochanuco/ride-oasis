@@ -24,6 +24,12 @@ const elements = {
   currentLocationPanel: document.getElementById('current-location-panel'),
   manualPanel: document.getElementById('manual-panel'),
   manualReset: document.getElementById('manual-reset'),
+  loopPanel: document.getElementById('loop-panel'),
+  loopKm: document.getElementById('loop-km'),
+  loopKmCurrent: document.getElementById('loop-km-current'),
+  loopCount: document.getElementById('loop-count'),
+  loopGenerate: document.getElementById('loop-generate'),
+  loopCandidates: document.getElementById('loop-candidates'),
   gpxFileName: document.getElementById('gpx-file-name'),
   routePointCount: document.getElementById('route-point-count'),
   distanceThreshold: document.getElementById('distance-threshold'),
@@ -96,9 +102,29 @@ const ROUTE_STYLES = {
     stroke: new ol.style.Stroke({ color: '#c0392b', width: 3, lineDash: [6, 4] })
   })
 };
+// 周回ルート (loop) の候補ごとの色。未選択は破線で細く、選択中は太い実線。
+const LOOP_COLORS = ['#e6550d', '#31a354', '#756bb1'];
+function loopCandidateStyle(color, selected) {
+  return new ol.style.Style({
+    stroke: new ol.style.Stroke({
+      color,
+      width: selected ? 5 : 3,
+      lineDash: selected ? null : [8, 6]
+    })
+  });
+}
+
 const routeLayer = new ol.layer.Vector({
   source: routeSource,
   style(feature) {
+    // loop 候補は専用色（segmentState より優先）。
+    const loopIndex = feature.get('loopIndex');
+    if (loopIndex != null) {
+      return loopCandidateStyle(
+        feature.get('loopColor') || LOOP_COLORS[0],
+        feature.get('loopSelected') === true
+      );
+    }
     const state = feature.get('segmentState');
     if (state && ROUTE_STYLES[state]) return ROUTE_STYLES[state];
     return ROUTE_STYLES.computed;
@@ -248,6 +274,13 @@ let manualPoints = [];
 //   coords: state=computed の時のみ [[lon,lat]...]、それ以外は null
 const MAX_MANUAL_STRAIGHT_KM = 25;
 let manualSegments = [];
+// 周回ルート (loop) モードの状態。
+//   loopCandidates: API が返した各ループ { coordinates, distanceKm, ... }
+//   loopCenter: 生成に使った現在地 [lon, lat]
+//   selectedLoopIndex: 選択中の候補 index（補給地点マッチ対象）
+let loopCandidates = [];
+let loopCenter = null;
+let selectedLoopIndex = -1;
 let cachedCoursePoints = [];
 let disabledCoursePointTypes = new Set();
 let currentRwgId = null;
@@ -326,9 +359,11 @@ function syncSourceModeUi() {
   elements.gpxFile.disabled = mode !== 'gpx';
   elements.useCurrentLocation.disabled = mode !== 'current';
   elements.manualReset.disabled = mode !== 'manual';
+  if (elements.loopGenerate) elements.loopGenerate.disabled = mode !== 'loop';
   elements.gpxPanel.classList.toggle('inactive', mode !== 'gpx');
   elements.currentLocationPanel.classList.toggle('inactive', mode !== 'current');
   elements.manualPanel.classList.toggle('inactive', mode !== 'manual');
+  if (elements.loopPanel) elements.loopPanel.classList.toggle('inactive', mode !== 'loop');
 }
 
 /** Resets visible and cached result points before a new search. */
@@ -2442,6 +2477,171 @@ async function handleCurrentLocation() {
   }
 }
 
+/** 周回ルートの距離スライダー表示 (例: "100km") を同期する。 */
+function syncLoopKmUi() {
+  if (elements.loopKm && elements.loopKmCurrent) {
+    elements.loopKmCurrent.textContent = `${elements.loopKm.value}km`;
+  }
+}
+
+/** 周回ルートの候補データ・選択状態・一覧 DOM をクリアする。 */
+function resetLoopState() {
+  loopCandidates = [];
+  loopCenter = null;
+  selectedLoopIndex = -1;
+  if (elements.loopCandidates) elements.loopCandidates.innerHTML = '';
+}
+
+/** 候補ループを地図に描画する（中心マーカー + 各候補の LineString）。 */
+function renderLoopCandidates() {
+  clearRouteVisualSources();
+  if (loopCenter) {
+    currentLocationSource.addFeature(
+      new ol.Feature({ geometry: new ol.geom.Point(ol.proj.fromLonLat(loopCenter)) })
+    );
+  }
+  for (let i = 0; i < loopCandidates.length; i += 1) {
+    const c = loopCandidates[i];
+    const feature = routeGeoJsonFormat.readFeature({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: c.coordinates },
+      properties: {}
+    });
+    feature.set('loopIndex', i);
+    feature.set('loopColor', LOOP_COLORS[i % LOOP_COLORS.length]);
+    feature.set('loopSelected', i === selectedLoopIndex);
+    c.feature = feature;
+    routeSource.addFeature(feature);
+  }
+  fitToVisibleData();
+}
+
+/** 候補ループの選択ボタン一覧を描画する。 */
+function renderLoopCandidateList() {
+  const container = elements.loopCandidates;
+  if (!container) return;
+  container.innerHTML = '';
+  loopCandidates.forEach((c, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'loop-candidate-item';
+    if (i === selectedLoopIndex) btn.classList.add('active');
+    btn.style.setProperty('--loop-color', LOOP_COLORS[i % LOOP_COLORS.length]);
+    const dot = document.createElement('span');
+    dot.className = 'loop-candidate-dot';
+    const label = document.createElement('span');
+    const dist = Number.isFinite(c.distanceKm) ? `${c.distanceKm}km` : '—';
+    label.textContent = `コース${i + 1}: ${dist}`;
+    btn.append(dot, label);
+    btn.addEventListener('click', () => selectLoopCandidate(i));
+    container.appendChild(btn);
+  });
+}
+
+/** 候補ループを 1 本選び、active route として補給地点マッチを走らせる。 */
+function selectLoopCandidate(index) {
+  if (index < 0 || index >= loopCandidates.length) return;
+  selectedLoopIndex = index;
+  for (let i = 0; i < loopCandidates.length; i += 1) {
+    const f = loopCandidates[i].feature;
+    if (f) f.set('loopSelected', i === index);
+  }
+  routeLayer.changed();
+
+  const c = loopCandidates[index];
+  routeFeature = null;
+  routeCoordinates = c.coordinates.slice();
+  routeElevations = [];
+  rebuildRouteElevationCache();
+  updateRoutePointCount();
+  renderElevationChart();
+  renderLoopCandidateList();
+  syncUrlState();
+  // 既存の補給地点マッチパイプラインを再利用（routeSource の候補ラインは保持）。
+  refreshMap([...routeCoordinates]);
+}
+
+/**
+ * 現在地を中心に、総距離 km × n 本の周回ルートを /api/random-course/loop で
+ * 生成し、候補を地図と一覧に描画する。既定で 1 本目（目標に最も近い）を選択。
+ */
+async function handleGenerateLoop() {
+  if (!navigator.geolocation) {
+    setStatus('このブラウザは現在地取得に対応していません');
+    return;
+  }
+  const km = Number(elements.loopKm?.value) || 100;
+  const n = Number(elements.loopCount?.value) || 3;
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  if (elements.loopGenerate) elements.loopGenerate.disabled = true;
+  setStatus('現在地を取得中...');
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
+      });
+    });
+    if (loadToken !== latestRouteLoadToken) return;
+    const center = [position.coords.longitude, position.coords.latitude];
+    loopCenter = center;
+    manualPoints = [];
+    setStatus(`周回ルートを生成中... (${km}km × ${n}本)`);
+    const qs = new URLSearchParams({
+      center: `${center[0]},${center[1]}`,
+      km: String(km),
+      n: String(n)
+    });
+    const res = await fetch(`${API_BASE}/random-course/loop?${qs.toString()}`);
+    if (loadToken !== latestRouteLoadToken) return;
+    if (!res.ok) {
+      let detail = '';
+      try {
+        const j = await res.json();
+        detail = j.detail || j.error || '';
+      } catch (_) { /* ignore parse error */ }
+      setStatus(detail ? `生成に失敗しました: ${detail}` : '周回ルートの生成に失敗しました');
+      return;
+    }
+    const fc = await res.json();
+    if (loadToken !== latestRouteLoadToken) return;
+    const candidates = (fc.features || [])
+      .map((f) => ({
+        coordinates: f.geometry?.coordinates,
+        distanceKm: f.properties?.distance_km,
+        direction: f.properties?.direction,
+        converged: f.properties?.converged
+      }))
+      .filter((c) => Array.isArray(c.coordinates) && c.coordinates.length >= 2);
+    if (candidates.length === 0) {
+      setStatus('この地点では周回ルートを生成できませんでした (地図データ範囲外の可能性)');
+      return;
+    }
+    loopCandidates = candidates;
+    selectedLoopIndex = -1;
+    renderLoopCandidates();
+    renderLoopCandidateList();
+    setStatus(`${candidates.length} 本の周回ルートを生成しました`);
+    // 既定で最も目標距離に近い 1 本目を選択し、補給地点をマッチさせる。
+    selectLoopCandidate(0);
+  } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
+    const message = error?.code === 1
+      ? '位置情報の利用が許可されていません'
+      : error?.code === 3
+        ? '現在地の取得がタイムアウトしました'
+        : '周回ルートの生成に失敗しました';
+    setStatus(message);
+    console.error(error);
+  } finally {
+    if (selectedSourceMode() === 'loop' && elements.loopGenerate) {
+      elements.loopGenerate.disabled = false;
+    }
+  }
+}
+
 /** Marks rendered point features that fall in the forward cone of the follow heading. */
 function applyForwardEmphasis() {
   if (followBearingDeg === null || !followLastCoord) {
@@ -2823,9 +3023,21 @@ function bindEvents() {
         elements.followToggle.checked = false;
         stopFollowMode();
       }
+      if (mode !== 'loop' && loopCandidates.length > 0) {
+        // 周回モードを離れたら候補をクリアして描画も消す。
+        resetLoopState();
+        clearRouteVisualSources();
+        resetResults();
+        routeCoordinates = [];
+        updateRoutePointCount();
+        renderElevationChart();
+      }
       syncSourceModeUi();
       if (mode === 'manual' && manualPoints.length === 0 && routeCoordinates.length === 0) {
         setStatus('地図をクリックして出発地を指定してください');
+      }
+      if (mode === 'loop') {
+        setStatus('総距離と本数を選んで「現在地から生成」を押してください');
       }
     });
   }
@@ -2849,6 +3061,12 @@ function bindEvents() {
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
   elements.followToggle.addEventListener('change', handleFollowToggle);
   elements.manualReset.addEventListener('click', resetManualState);
+  if (elements.loopGenerate) {
+    elements.loopGenerate.addEventListener('click', handleGenerateLoop);
+  }
+  if (elements.loopKm) {
+    elements.loopKm.addEventListener('input', syncLoopKmUi);
+  }
   elements.geoSearchForm.addEventListener('submit', handleGeoSearchSubmit);
   elements.geoSearchInput.addEventListener('input', handleGeoSearchInput);
   elements.geoSearchClear.addEventListener('click', handleGeoSearchClear);
@@ -3036,6 +3254,7 @@ function bindEvents() {
 syncSourceModeUi();
 updateRoutePointCount();
 syncDistanceUi();
+syncLoopKmUi();
 buildPointList([]);
 updateSummary(0);
 syncCueSheetButton();
