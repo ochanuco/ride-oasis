@@ -230,6 +230,39 @@ test('generateRouteCandidate: ループ不可なら往復にフォールバッ�
   assert.equal(r.kind, 'out-and-back', `往復になる: ${r.kind}`);
 });
 
+test('buildLoopVertices: rng+jitter で頂点がゆらぎ、同じ rng なら再現する', () => {
+  const plain = buildLoopVertices(CENTER, 5, 8, 0, 1);
+  // 固定 rng（0.75）で jitter ありにすると頂点が動く。
+  const jittered = buildLoopVertices(CENTER, 5, 8, 0, 1, () => 0.75, 0.2);
+  let moved = 0;
+  for (let i = 1; i < plain.length - 1; i += 1) {
+    if (haversineKm(plain[i], jittered[i]) > 0.05) moved += 1;
+  }
+  assert.ok(moved > 0, 'jitter で少なくとも 1 頂点は動く');
+  // 同じ rng 列なら同一（再現性）。
+  const again = buildLoopVertices(CENTER, 5, 8, 0, 1, () => 0.75, 0.2);
+  assert.deepEqual(jittered, again, '同じ rng なら再現');
+});
+
+test('generateLoopCourse: seed が違えばルートが変わり、同じ seed なら再現する', async () => {
+  const a = await generateLoopCourse(CENTER, 40, { seed: 111 }, straightLineRouteLeg());
+  const b = await generateLoopCourse(CENTER, 40, { seed: 222 }, straightLineRouteLeg());
+  const a2 = await generateLoopCourse(CENTER, 40, { seed: 111 }, straightLineRouteLeg());
+  assert.deepEqual(a.coordinates, a2.coordinates, '同じ seed は再現');
+  assert.notDeepEqual(a.coordinates, b.coordinates, '違う seed は別ルート');
+});
+
+test('generateOutAndBackCourse: 復路は逆走でなくふくらむ（非対称）', async () => {
+  const r = await generateOutAndBackCourse(CENTER, 40, { seed: 5 }, straightLineRouteLeg());
+  const c = r.coordinates;
+  // 完全なピンポンなら座標列は回文（先頭=末尾, …）になる。非対称なら回文でない。
+  let palindrome = true;
+  for (let i = 0; i < Math.floor(c.length / 2); i += 1) {
+    if (haversineKm(c[i], c[c.length - 1 - i]) > 0.05) { palindrome = false; break; }
+  }
+  assert.equal(palindrome, false, '行き帰りが別ルート（回文でない）');
+});
+
 test('clampNumber/clampInt: 異常値は fallback / 範囲内に倒す', () => {
   assert.equal(clampNumber('abc', 1, 160, 1), 1, 'NaN は fallback');
   assert.equal(clampNumber(200, 1, 160, 1), 160, '上限クランプ');

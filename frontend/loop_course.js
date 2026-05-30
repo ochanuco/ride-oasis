@@ -54,6 +54,29 @@
   const SINGLE_LOOP_MAX_KM = 70;
   // petal が割り当て方位で作れないとき、方位を回して再挑戦する順序（度）。
   const PETAL_BEARING_JITTERS = [0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180];
+  // 円ループ各頂点の角度・半径のゆらぎ幅（毎回・同じ場所でもルートを変えるため）。
+  const DEFAULT_JITTER_FRAC = 0.18;
+
+  // 決定的な擬似乱数 (mulberry32)。seed を変えれば別のルート、同じ seed なら
+  // 再現する（テスト用）。Math.random は使わず seed 駆動にしてある。
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function next() {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // opts.rng があればそれを、なければ opts.seed と salt（方位など）から rng を作る。
+  function makeRng(opts, salt) {
+    if (opts && typeof opts.rng === 'function') return opts.rng;
+    const base = opts && Number.isFinite(opts.seed) ? Math.floor(opts.seed) : 1;
+    let s = (base ^ Math.round((salt || 0) * 1000)) >>> 0;
+    if (s === 0) s = 1;
+    return mulberry32(s);
+  }
 
   function toRad(deg) {
     return (deg * Math.PI) / 180;
@@ -134,15 +157,26 @@
    * 円の幾何中心を center から基準方位へ radiusKm ずらすことで、center が
    * 円周上の 1 点になる（往復スポークが出ない真の周回）。
    * 返り値の先頭と末尾は center（ループを閉じる）。
+   *
+   * rng（0..1）と jitterFrac を渡すと、各頂点の角度・半径に ±jitterFrac の
+   * ゆらぎを与える。完全な円ではなく不規則な形になり、seed を変えれば毎回
+   * 違うルートになる（飽きを防ぐのが目的）。
    */
-  function buildLoopVertices(center, radiusKm, vertexCount, bearingOffsetDeg, direction) {
+  function buildLoopVertices(center, radiusKm, vertexCount, bearingOffsetDeg, direction, rng, jitterFrac) {
     const circleCenter = destinationPoint(center, bearingOffsetDeg, radiusKm);
     // 円中心から見た center の方位 ≈ bearingOffsetDeg + 180（この縮尺では十分）。
     const startAngle = bearingOffsetDeg + 180;
+    const jf = rng ? (jitterFrac || 0) : 0;
+    const stepDeg = 360 / vertexCount;
     const verts = [center.slice()];
     for (let i = 1; i < vertexCount; i += 1) {
-      const angle = startAngle + direction * ((360 * i) / vertexCount);
-      verts.push(destinationPoint(circleCenter, angle, radiusKm));
+      let angle = startAngle + direction * (stepDeg * i);
+      let r = radiusKm;
+      if (jf > 0) {
+        angle += (rng() * 2 - 1) * stepDeg * jf; // ±jf ステップぶん角度をずらす
+        r = radiusKm * (1 + (rng() * 2 - 1) * jf); // ±jf 半径を伸縮
+      }
+      verts.push(destinationPoint(circleCenter, angle, r));
     }
     verts.push(center.slice());
     return verts;
@@ -210,8 +244,10 @@
       tolerance = DEFAULT_TOLERANCE,
       maxLegKm = MAX_LEG_KM,
       maxIterations = MAX_ITERATIONS,
-      routeLegFactory
+      routeLegFactory,
+      jitterFrac = DEFAULT_JITTER_FRAC
     } = opts || {};
+    const rng = makeRng(opts, bearingOffsetDeg);
 
     // routeLegFactory が与えられた場合、この変種専用の routeLeg を 1 回だけ作る。
     let leg = routeLeg;
@@ -229,7 +265,7 @@
 
     for (let iter = 0; iter < maxIterations; iter += 1) {
       const vertexCount = chooseVertexCount(radiusKm, maxLegKm);
-      const rim = buildLoopVertices(center, radiusKm, vertexCount, bearingOffsetDeg, direction);
+      const rim = buildLoopVertices(center, radiusKm, vertexCount, bearingOffsetDeg, direction, rng, jitterFrac);
       const waypoints = splitLongLegs(rim, maxLegKm);
       const legs = await routeAllLegs(waypoints, leg);
       if (!legs) {
@@ -324,7 +360,9 @@
 
   /**
    * 往復（out-and-back）ルートを 1 本生成する。中心から基準方位へ「片道 ≈
-   * targetKm/2」のスパーク（複数脚に分割）を出し、その逆順を繋いで戻る。
+   * targetKm/2」のスパーク（複数脚に分割）を出して折り返す。復路は完全な
+   * 逆走（ピンポン）ではなく、横にふくらませた別の道を通す（行き帰りで景色が
+   * 変わるように）。膨らませた復路が組めない場合のみ逆走にフォールバック。
    * その方向に道さえあれば成立するので、海沿い・山際などループが組めない地点
    * でも目標距離を満たしやすい。往路 spoke 長を反復補正して総距離 ±tolerance に
    * 収束させる。作れない場合は null。
@@ -350,28 +388,45 @@
     }
     if (typeof leg !== 'function') return null;
 
-    // 片道目標は総距離の半分。道なりは直線より長いので spoke を少し短めに置く。
-    let spokeKm = (targetKm / 2) * INITIAL_RADIUS_FACTOR;
+    const rng = makeRng(opts, bearingOffsetDeg + 7); // ループと違う salt
+    const side = rng() < 0.5 ? 1 : -1; // 復路をどちら側にふくらませるか
+    const lateralFrac = 0.18 + rng() * 0.2; // 片道に対する横ふくらみ（0.18〜0.38）
+
+    // 復路がふくらむぶん総距離は往路の 2 倍より少し長い。spoke を控えめに置く。
+    let spokeKm = (targetKm / 2) * INITIAL_RADIUS_FACTOR * 0.92;
     let best = null;
 
     for (let iter = 0; iter < maxIterations; iter += 1) {
       const turnaround = destinationPoint(center, bearingOffsetDeg, spokeKm);
-      const waypoints = splitLongLegs([center.slice(), turnaround], maxLegKm);
+      const outWaypoints = splitLongLegs([center.slice(), turnaround], maxLegKm);
       // eslint-disable-next-line no-await-in-loop
-      const legs = await routeAllLegs(waypoints, leg);
-      if (!legs) {
+      const outLegs = await routeAllLegs(outWaypoints, leg);
+      if (!outLegs) {
         spokeKm *= 0.8;
         continue;
       }
-      const outCoords = stitchCoordinates(legs);
-      const onewayKm = polylineLengthKm(outCoords);
-      const totalKm = onewayKm * 2;
+      const outCoords = stitchCoordinates(outLegs);
+
+      // 復路: spoke の中点を直交方向へずらした点を経由（= 横にふくらむ別ルート）。
+      const mid = [(center[0] + turnaround[0]) / 2, (center[1] + turnaround[1]) / 2];
+      const bow = destinationPoint(mid, bearingOffsetDeg + 90 * side, spokeKm * lateralFrac);
+      const retWaypoints = splitLongLegs([turnaround, bow, center.slice()], maxLegKm);
+      // eslint-disable-next-line no-await-in-loop
+      const retLegs = await routeAllLegs(retWaypoints, leg);
+
+      let coordinates;
+      if (retLegs) {
+        // 往路 + ふくらんだ復路（折り返し点の重複を 1 個飛ばす）。
+        coordinates = outCoords.concat(stitchCoordinates(retLegs).slice(1));
+      } else {
+        // ふくらみ復路が作れない方向は逆走にフォールバック。
+        coordinates = outCoords.concat(outCoords.slice(0, -1).reverse());
+      }
+      const totalKm = polylineLengthKm(coordinates);
       const errRatio = targetKm > 0 ? Math.abs(totalKm - targetKm) / targetKm : Infinity;
       if (!best || errRatio < best.errRatio) {
-        // 復路は往路の逆順（折り返し点の重複を 1 個飛ばす）。終点は中心に戻る。
-        const back = outCoords.slice(0, -1).reverse();
         best = {
-          coordinates: outCoords.concat(back),
+          coordinates,
           distanceKm: totalKm,
           errRatio,
           iterations: iter + 1,

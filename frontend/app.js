@@ -2591,8 +2591,9 @@ async function loopRouteLeg(from, to) {
 /**
  * 中心 center・総距離 km・n 本で 1 回ぶん生成し、出来た本数を返す。
  * 変種ごとに独立生成し、出来たものから順次描画（最初の 1 本を即選択）。
+ * seed / baseRot で毎回ルートを揺らがせる（同じ場所・距離でも違うルートに）。
  */
-async function tryGenerateLoops(center, km, n, loadToken, progressLabel) {
+async function tryGenerateLoops(center, km, n, loadToken, progressLabel, seed, baseRot) {
   loopCandidates = [];
   selectedLoopIndex = -1;
   renderLoopCandidates(); // 中心マーカーだけ先に出す
@@ -2601,11 +2602,12 @@ async function tryGenerateLoops(center, km, n, loadToken, progressLabel) {
   let firstSelected = false;
   const tasks = [];
   for (let i = 0; i < n; i += 1) {
-    const bearingOffsetDeg = Math.round(baseStep * i);
+    // baseRot で全体の向きを毎回ずらし、変種ごとに 360/n 回す。
+    const bearingOffsetDeg = Math.round(baseRot + baseStep * i);
     const direction = i % 2 === 0 ? 1 : -1;
     tasks.push(
       window.LoopCourse
-        .generateRouteCandidate(center, km, { bearingOffsetDeg, direction }, loopRouteLeg)
+        .generateRouteCandidate(center, km, { bearingOffsetDeg, direction, seed: seed + i * 1000 }, loopRouteLeg)
         .then((course) => {
           if (loadToken !== latestRouteLoadToken || !course) return;
           loopCandidates.push({
@@ -2649,6 +2651,10 @@ async function generateLoopsFromCenter(center, loadToken) {
   const n = Number(elements.loopCount?.value) || 3;
   loopCenter = center;
   manualPoints = [];
+  // この生成ぶんのゆらぎ。押すたびに seed と全体方位が変わり、同じ場所・距離でも
+  // 違うルートになる（毎週末の飽き防止が本機能の目的）。
+  const seed = Math.floor(Math.random() * 1e9);
+  const baseRot = Math.random() * 360;
 
   const ladder = loopDistanceLadder(requestedKm);
   for (let i = 0; i < ladder.length; i += 1) {
@@ -2658,7 +2664,7 @@ async function generateLoopsFromCenter(center, loadToken) {
       ? `${requestedKm}km は難しいため ${km}km で再生成中...`
       : `周回ルートを生成中... (${km}km × ${n}本)`);
     // eslint-disable-next-line no-await-in-loop
-    const count = await tryGenerateLoops(center, km, n, loadToken, `周回ルート生成中... (${km}km)`);
+    const count = await tryGenerateLoops(center, km, n, loadToken, `周回ルート生成中... (${km}km)`, seed, baseRot);
     if (loadToken !== latestRouteLoadToken) return;
     if (count > 0) {
       setStatus(reduced
