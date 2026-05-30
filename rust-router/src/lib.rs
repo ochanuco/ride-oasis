@@ -9,15 +9,15 @@
 //! - [`astar`] (legacy) — original forward A* PoC on flat typed arrays.
 //!   Kept for backward compat; not used in production.
 
-mod csr;
 mod chquery;
-mod snap;
+mod csr;
 mod route_filter;
+mod snap;
 
-use std::collections::BinaryHeap;
-use std::cmp::Ordering;
-use wasm_bindgen::prelude::*;
 use serde::Serialize;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+use wasm_bindgen::prelude::*;
 
 const MIN_COST_FACTOR: f64 = 0.7;
 
@@ -57,12 +57,7 @@ fn haversine_m(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
 /// Forward A* on the flat graph representation. Returns the path including
 /// start and goal indices, prefixed by the total distance.
 #[wasm_bindgen]
-pub fn astar(
-    node_coords: &[f64],
-    edge_data: &[f64],
-    start: u32,
-    goal: u32,
-) -> Vec<f64> {
+pub fn astar(node_coords: &[f64], edge_data: &[f64], start: u32, goal: u32) -> Vec<f64> {
     if node_coords.len() < 2 || node_coords.len() % 2 != 0 {
         return vec![f64::INFINITY];
     }
@@ -98,7 +93,10 @@ pub fn astar(
 
     dist[start as usize] = 0.0;
     let mut heap = BinaryHeap::new();
-    heap.push(HeapEntry { f: heuristic(start), idx: start });
+    heap.push(HeapEntry {
+        f: heuristic(start),
+        idx: start,
+    });
 
     while let Some(HeapEntry { idx: u_idx, .. }) = heap.pop() {
         if settled[u_idx as usize] {
@@ -119,7 +117,10 @@ pub fn astar(
             if ng < dist[to as usize] {
                 dist[to as usize] = ng;
                 parent[to as usize] = u_idx as i32;
-                heap.push(HeapEntry { f: ng + heuristic(to), idx: to });
+                heap.push(HeapEntry {
+                    f: ng + heuristic(to),
+                    idx: to,
+                });
             }
         }
     }
@@ -183,25 +184,45 @@ pub fn route_ch(
     if !max_snap_meters.is_finite() || max_snap_meters <= 0.0 {
         return to_err("invalid_max_snap_meters");
     }
-    if !from_lon.is_finite() || !from_lat.is_finite() || !to_lon.is_finite() || !to_lat.is_finite() {
+    if !from_lon.is_finite() || !from_lat.is_finite() || !to_lon.is_finite() || !to_lat.is_finite()
+    {
         return to_err("invalid_coords");
     }
 
-    // Copy each Uint8Array into Vec<u8> for owned access during CSR build.
-    // 不正な要素 (Uint8Array 以外) を silent skip すると欠落グラフで誤った
-    // 結果を返してしまうため、明示的に error 返却する (CodeRabbit PR #87)。
+    // Validate all elements up front. The wasm path keeps JS Uint8Array handles
+    // and lets CSR build copy one tile at a time into reusable scratch memory;
+    // the native compile fallback keeps the previous owned Vec path.
+    #[cfg(target_arch = "wasm32")]
+    let mut u8_arrays: Vec<js_sys::Uint8Array> = Vec::with_capacity(buffers.length() as usize);
+    #[cfg(not(target_arch = "wasm32"))]
     let mut buf_vec: Vec<Vec<u8>> = Vec::with_capacity(buffers.length() as usize);
     for i in 0..buffers.length() {
         let v = buffers.get(i);
         match v.dyn_into::<js_sys::Uint8Array>() {
-            Ok(u8a) => buf_vec.push(u8a.to_vec()),
+            Ok(u8a) => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    u8_arrays.push(u8a);
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    buf_vec.push(u8a.to_vec());
+                }
+            }
             Err(_) => return to_err("invalid_buffer_element"),
         }
     }
 
     let t_csr0 = chquery_now_ms();
-    let csr = csr::build_csr(&buf_vec);
+    #[cfg(target_arch = "wasm32")]
+    let mut csr = csr::build_csr_from_uint8_arrays(&u8_arrays);
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut csr = csr::build_csr(&buf_vec);
     let csr_build_ms = (chquery_now_ms() - t_csr0) as u32;
+    #[cfg(target_arch = "wasm32")]
+    drop(u8_arrays);
+    #[cfg(not(target_arch = "wasm32"))]
+    drop(buf_vec);
     let csr_bytes = csr.memory_bytes() as u32;
 
     let from_snap = snap::snap(&csr, from_lon, from_lat);
@@ -216,11 +237,17 @@ pub fn route_ch(
     if to_snap.distance_m > max_snap_meters {
         return to_err("no_nearby_node_to");
     }
+    csr.release_ids();
 
     // CH 主経路 (level 制約あり)
     let t_ch0 = chquery_now_ms();
-    let mut rc = chquery::ch_query(&csr, from_snap.idx, to_snap.idx, &chquery::ChQueryOpts::default());
-    let mut ch_ms = (chquery_now_ms() - t_ch0) as u32;
+    let mut rc = chquery::ch_query(
+        &csr,
+        from_snap.idx,
+        to_snap.idx,
+        &chquery::ChQueryOpts::default(),
+    );
+    let ch_ms = (chquery_now_ms() - t_ch0) as u32;
     let mut fallback_ms: Option<u32> = None;
     let mut algorithm = "ch-wasm";
     // cap 触れたら plain bidi Dijkstra fallback (level 制約なし)
@@ -242,14 +269,16 @@ pub fn route_ch(
     }
 
     if !rc.distance.is_finite() {
-        return to_err_with("unreachable_in_corridor", &RouteMeta {
+        let meta = RouteMeta {
             csr_bytes,
             csr_node_count: csr.node_count,
             csr_edge_count: csr.edge_count,
             csr_build_ms,
             ch_ms,
             fallback_ms,
-        });
+        };
+        drop(csr);
+        return to_err_with("unreachable_in_corridor", &meta);
     }
 
     // shortcut 展開
@@ -270,6 +299,12 @@ pub fn route_ch(
         }
         coords.push((lon, lat));
     }
+    let node_count = expanded.len() as u32;
+    let csr_node_count = csr.node_count;
+    let csr_edge_count = csr.edge_count;
+    drop(expanded);
+    drop(csr);
+
     // OSM ids of from/to for caller logging (i64 → f64 で JS Number 範囲内、< 2^53)
     let result = RouteOk {
         distance: rc.distance,
@@ -284,10 +319,10 @@ pub fn route_ch(
         coords,
         algorithm: algorithm.to_string(),
         csr_bytes,
-        csr_node_count: csr.node_count,
-        csr_edge_count: csr.edge_count,
+        csr_node_count,
+        csr_edge_count,
         csr_build_ms,
-        node_count: expanded.len() as u32,
+        node_count,
     };
     serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
 }
@@ -358,16 +393,14 @@ fn chquery_now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn straight_chain() {
         // 3 nodes: 0 → 1 → 2 (each segment ~111m apart in lon)
         let nodes: Vec<f64> = vec![135.0, 34.0, 135.001, 34.0, 135.002, 34.0];
         let edges: Vec<f64> = vec![
-            0.0, 1.0, 100.0,
-            1.0, 0.0, 100.0,
-            1.0, 2.0, 100.0,
-            2.0, 1.0, 100.0,
+            0.0, 1.0, 100.0, 1.0, 0.0, 100.0, 1.0, 2.0, 100.0, 2.0, 1.0, 100.0,
         ];
         let r = astar(&nodes, &edges, 0, 2);
         assert_eq!(r[0], 200.0);
@@ -388,5 +421,137 @@ mod tests {
         let edges: Vec<f64> = vec![];
         let r = astar(&nodes, &edges, 0, 1);
         assert_eq!(r, vec![f64::INFINITY]);
+    }
+
+    fn push_node_v2(buf: &mut Vec<u8>, id: u64, lon: f32, lat: f32, level: u32, core: u8) {
+        buf.extend_from_slice(&(id as f64).to_le_bytes());
+        buf.extend_from_slice(&lon.to_le_bytes());
+        buf.extend_from_slice(&lat.to_le_bytes());
+        let word = level | if core != 0 { 1 << 31 } else { 0 };
+        buf.extend_from_slice(&word.to_le_bytes());
+    }
+
+    fn push_edge_v2(buf: &mut Vec<u8>, from: u64, to: u64, to_lon: f32, to_lat: f32, cost: f32) {
+        buf.extend_from_slice(&(from as f64).to_le_bytes());
+        buf.extend_from_slice(&(to as f64).to_le_bytes());
+        buf.extend_from_slice(&to_lon.to_le_bytes());
+        buf.extend_from_slice(&to_lat.to_le_bytes());
+        buf.extend_from_slice(&cost.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&0f64.to_le_bytes());
+    }
+
+    fn synthetic_tile(width: usize, height: usize) -> Vec<u8> {
+        let node_count = width * height;
+        let edge_count = (width - 1) * height + width * (height - 1);
+        let mut buf = Vec::with_capacity(
+            csr::HEADER_BYTES + node_count * csr::NODE_BYTES_V2 + edge_count * csr::EDGE_BYTES_V2,
+        );
+        buf.extend_from_slice(&csr::MAGIC.to_le_bytes());
+        buf.push(2);
+        buf.push(0);
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&(node_count as u32).to_le_bytes());
+        buf.extend_from_slice(&(edge_count as u32).to_le_bytes());
+
+        let id_at = |x: usize, y: usize| (y * width + x + 1) as u64;
+        for y in 0..height {
+            for x in 0..width {
+                let id = id_at(x, y);
+                let lon = 135.0 + x as f32 * 0.0001;
+                let lat = 34.0 + y as f32 * 0.0001;
+                push_node_v2(&mut buf, id, lon, lat, id as u32, 0);
+            }
+        }
+        for y in 0..height {
+            for x in 0..width {
+                let from = id_at(x, y);
+                if x + 1 < width {
+                    let to = id_at(x + 1, y);
+                    push_edge_v2(
+                        &mut buf,
+                        from,
+                        to,
+                        135.0 + (x + 1) as f32 * 0.0001,
+                        34.0 + y as f32 * 0.0001,
+                        10.0,
+                    );
+                }
+                if y + 1 < height {
+                    let to = id_at(x, y + 1);
+                    push_edge_v2(
+                        &mut buf,
+                        from,
+                        to,
+                        135.0 + x as f32 * 0.0001,
+                        34.0 + (y + 1) as f32 * 0.0001,
+                        10.0,
+                    );
+                }
+            }
+        }
+        buf
+    }
+
+    #[test]
+    #[ignore = "timing demo; run with --ignored --nocapture"]
+    fn perf_timing_demo() {
+        let tile = synthetic_tile(96, 96);
+        let buffers = vec![tile];
+
+        let t0 = Instant::now();
+        let csr = csr::build_csr(&buffers);
+        let csr_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t0 = Instant::now();
+        let a = snap::snap(&csr, 135.001, 34.001).unwrap();
+        let b = snap::snap(&csr, 135.008, 34.008).unwrap();
+        let snap_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t0 = Instant::now();
+        let ch = chquery::ch_query(&csr, a.idx, b.idx, &chquery::ChQueryOpts::default());
+        let ch_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t0 = Instant::now();
+        let fallback = chquery::ch_query(
+            &csr,
+            a.idx,
+            b.idx,
+            &chquery::ChQueryOpts {
+                settled_cap: 300_000,
+                pops_cap: 800_000,
+                time_budget_ms: 10_000,
+                no_level_constraint: true,
+            },
+        );
+        let fallback_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let mut route = Vec::with_capacity(512 * 2);
+        for i in 0..512 {
+            route.push(135.0 + i as f64 * 0.00001);
+            route.push(34.0 + (i % 32) as f64 * 0.000005);
+        }
+        let mut shops = Vec::with_capacity(4096 * 2);
+        for i in 0..4096 {
+            shops.push(135.0 + (i % 128) as f64 * 0.00002);
+            shops.push(34.0 + (i / 128) as f64 * 0.00002);
+        }
+        let t0 = Instant::now();
+        let distances = route_filter::route_distances(&route, &shops);
+        let route_dist_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        eprintln!(
+            "perf_timing_demo nodes={} edges={} csr_ms={:.3} snap2_ms={:.3} ch_ms={:.3} fallback_ms={:.3} route_dist_ms={:.3} ch_dist={:.1} fb_dist={:.1} route_out={}",
+            csr.node_count,
+            csr.edge_count,
+            csr_ms,
+            snap_ms,
+            ch_ms,
+            fallback_ms,
+            route_dist_ms,
+            ch.distance,
+            fallback.distance,
+            distances.len()
+        );
     }
 }
