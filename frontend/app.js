@@ -2594,15 +2594,27 @@ function loopDistanceLadder(requestedKm) {
   return Array.from(set).sort((a, b) => b - a);
 }
 
+// 1 脚の /api/route が冷えていると遅いことがあるが、ハングは避けたいので
+// タイムアウトを設ける（多数の脚を並列に投げるため、詰まると全体が止まる）。
+const LOOP_LEG_TIMEOUT_MS = 30000;
+
 /** /api/route で 1 脚を解く routeLeg。座標は [lon, lat]、失敗時は { error }。 */
 async function loopRouteLeg(from, to) {
   const qs = new URLSearchParams({ from: `${from[0]},${from[1]}`, to: `${to[0]},${to[1]}` });
-  const res = await fetch(`${API_BASE}/route?${qs.toString()}`);
-  if (!res.ok) return { error: `route_${res.status}` };
-  const j = await res.json();
-  const coords = j.geometry?.coordinates;
-  if (!Array.isArray(coords) || coords.length < 2) return { error: 'route_empty' };
-  return { coordinates: coords };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LOOP_LEG_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/route?${qs.toString()}`, { signal: controller.signal });
+    if (!res.ok) return { error: `route_${res.status}` };
+    const j = await res.json();
+    const coords = j.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) return { error: 'route_empty' };
+    return { coordinates: coords };
+  } catch (e) {
+    return { error: e?.name === 'AbortError' ? 'route_timeout' : 'route_failed' };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
