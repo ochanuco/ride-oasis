@@ -636,6 +636,13 @@ input[type="search"]::-webkit-search-cancel-button {
   margin-top: var(--space-2);
 }
 
+.loop-candidates-head {
+  flex-basis: 100%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
 .loop-candidate-item {
   display: inline-flex;
   align-items: center;

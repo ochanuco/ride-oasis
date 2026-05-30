@@ -102,16 +102,24 @@ const ROUTE_STYLES = {
     stroke: new ol.style.Stroke({ color: '#c0392b', width: 3, lineDash: [6, 4] })
   })
 };
-// 周回ルート (loop) の候補ごとの色。未選択は破線で細く、選択中は太い実線。
-const LOOP_COLORS = ['#e6550d', '#31a354', '#756bb1'];
+// 周回ルート (loop) の候補ごとの色。選択中は太い実線、未選択も実線だが細め。
+// 補給地点ドットや地図に埋もれないよう、白いケーシング（縁取り）を下に敷く。
+const LOOP_COLORS = ['#e6550d', '#1a8a3f', '#6a51c9'];
 function loopCandidateStyle(color, selected) {
-  return new ol.style.Style({
-    stroke: new ol.style.Stroke({
-      color,
-      width: selected ? 5 : 3,
-      lineDash: selected ? null : [8, 6]
+  const w = selected ? 6 : 4;
+  return [
+    // 白ケーシング（視認性向上）
+    new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.9)', width: w + 3 })
+    }),
+    // 本体（未選択は少し薄く）
+    new ol.style.Style({
+      stroke: new ol.style.Stroke({
+        color: selected ? color : `${color}cc`,
+        width: w
+      })
     })
-  });
+  ];
 }
 
 const routeLayer = new ol.layer.Vector({
@@ -227,8 +235,10 @@ const map = new ol.Map({
   target: 'map',
   layers: [
     new ol.layer.Tile({ source: new ol.source.OSM() }),
-    routeLayer,
+    // ルート線は補給地点ドットより上に描く。下にあると 100 件超のドットに
+    // 埋もれて「ルートが出ていない」ように見える（周回モードで顕著）。
     pointLayer,
+    routeLayer,
     endpointLayer,
     currentLocationLayer,
     coursePointLayer,
@@ -2521,6 +2531,13 @@ function renderLoopCandidateList() {
   const container = elements.loopCandidates;
   if (!container) return;
   container.innerHTML = '';
+  if (loopCandidates.length > 0) {
+    // 補給地点の件数表示に status を奪われても本数が分かるよう、常設の見出し。
+    const head = document.createElement('div');
+    head.className = 'loop-candidates-head';
+    head.textContent = `生成コース ${loopCandidates.length} 本（タップで切替）`;
+    container.appendChild(head);
+  }
   loopCandidates.forEach((c, i) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -2600,35 +2617,54 @@ async function tryGenerateLoops(center, km, n, loadToken, progressLabel, seed, b
   renderLoopCandidateList();
   const baseStep = 360 / n;
   let firstSelected = false;
-  const tasks = [];
-  for (let i = 0; i < n; i += 1) {
-    // baseRot で全体の向きを毎回ずらし、変種ごとに 360/n 回す。
-    const bearingOffsetDeg = Math.round(baseRot + baseStep * i);
-    const direction = i % 2 === 0 ? 1 : -1;
-    tasks.push(
-      window.LoopCourse
-        .generateRouteCandidate(center, km, { bearingOffsetDeg, direction, seed: seed + i * 1000 }, loopRouteLeg)
-        .then((course) => {
-          if (loadToken !== latestRouteLoadToken || !course) return;
-          loopCandidates.push({
-            coordinates: course.coordinates,
-            distanceKm: Math.round(course.distanceKm * 100) / 100,
-            direction: course.direction === 1 ? 'cw' : 'ccw',
-            converged: course.converged,
-            kind: course.kind || 'loop'
-          });
-          renderLoopCandidates();
-          renderLoopCandidateList();
-          if (!firstSelected) {
-            firstSelected = true;
-            selectLoopCandidate(loopCandidates.length - 1);
-          }
-          setStatus(`${progressLabel} (${loopCandidates.length}/${n} 本完成)`);
-        })
-        .catch(() => { /* この変種は捨てる */ })
+
+  // 方位プール: 本命 n 本 + 予備（半ステップ/三分割ずらし）。ある方位が海・山で
+  // 作れなくても、別方位を追加で試して要求本数 n を埋める（本数を減らさない）。
+  const pool = [];
+  for (let i = 0; i < n; i += 1) pool.push({ b: baseRot + baseStep * i, dir: i % 2 === 0 ? 1 : -1, salt: i });
+  for (let i = 0; i < n; i += 1) pool.push({ b: baseRot + baseStep * i + baseStep / 2, dir: i % 2 === 0 ? -1 : 1, salt: n + i });
+  for (let i = 0; i < n; i += 1) pool.push({ b: baseRot + baseStep * i + baseStep / 3, dir: 1, salt: 2 * n + i });
+
+  const addCandidate = (course) => {
+    if (loadToken !== latestRouteLoadToken || !course) return;
+    loopCandidates.push({
+      coordinates: course.coordinates,
+      distanceKm: Math.round(course.distanceKm * 100) / 100,
+      direction: course.direction === 1 ? 'cw' : 'ccw',
+      converged: course.converged,
+      kind: course.kind || 'loop'
+    });
+    renderLoopCandidates();
+    renderLoopCandidateList();
+    if (!firstSelected) {
+      firstSelected = true;
+      selectLoopCandidate(loopCandidates.length - 1);
+    }
+    setStatus(`${progressLabel} (${loopCandidates.length}/${n} 本完成)`);
+  };
+
+  // 不足ぶんを波状に追加投入して n 本まで埋める。
+  let idx = 0;
+  while (loopCandidates.length < n && idx < pool.length) {
+    const need = n - loopCandidates.length;
+    const batch = pool.slice(idx, idx + need);
+    idx += batch.length;
+    // eslint-disable-next-line no-await-in-loop
+    const results = await Promise.all(
+      batch.map((s) =>
+        window.LoopCourse
+          .generateRouteCandidate(
+            center,
+            km,
+            { bearingOffsetDeg: Math.round(s.b), direction: s.dir, seed: seed + s.salt * 1000 },
+            loopRouteLeg
+          )
+          .catch(() => null)
+      )
     );
+    if (loadToken !== latestRouteLoadToken) return loopCandidates.length;
+    for (const c of results) addCandidate(c);
   }
-  await Promise.all(tasks);
   return loopCandidates.length;
 }
 
