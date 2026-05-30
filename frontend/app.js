@@ -2561,46 +2561,41 @@ function selectLoopCandidate(index) {
   refreshMap([...routeCoordinates]);
 }
 
-/**
- * 指定した中心 [lon, lat] から、総距離 km × n 本の周回ルートを生成して候補を
- * 地図と一覧に描画する。既定で 1 本目（目標に最も近い）を選択。
- *
- * 生成ロジック（window.LoopCourse）はブラウザ側で動かし、各脚は /api/route の
- * 並列リクエストで解く。広域（160km）でも個々の /api/route は別 isolate・小さな
- * corridor CSR で走るので、サーバ 1 リクエストに集約したときの 128MB/30s 上限
- * （= 1102 exceededMemory）を避けられる。
- */
-async function generateLoopsFromCenter(center, loadToken) {
-  if (!window.LoopCourse) {
-    setStatus('周回ルート生成モジュールの初期化に失敗しました。再読み込みしてください');
-    return;
+// フォールバックで距離を縮める下限と段階（要求距離に対する係数）。
+const LOOP_MIN_FALLBACK_KM = 10;
+const LOOP_FALLBACK_FACTORS = [1, 0.7, 0.5, 0.35, 0.2];
+
+/** 要求距離から、降順・重複なし・下限以上の「試す距離」ラダーを作る。 */
+function loopDistanceLadder(requestedKm) {
+  const set = new Set();
+  for (const f of LOOP_FALLBACK_FACTORS) {
+    const km = Math.max(LOOP_MIN_FALLBACK_KM, Math.round((requestedKm * f) / 5) * 5);
+    if (km <= requestedKm) set.add(km);
   }
-  const km = Number(elements.loopKm?.value) || 100;
-  const n = Number(elements.loopCount?.value) || 3;
-  loopCenter = center;
-  manualPoints = [];
-  setStatus(`周回ルートを生成中... (${km}km × ${n}本)`);
+  set.add(Math.min(requestedKm, LOOP_MIN_FALLBACK_KM)); // 必ず下限も試す
+  return Array.from(set).sort((a, b) => b - a);
+}
 
-  // 1 脚 = /api/route の 1 リクエスト。座標は [lon, lat]。失敗時は { error }。
-  const routeLeg = async (from, to) => {
-    const qs = new URLSearchParams({
-      from: `${from[0]},${from[1]}`,
-      to: `${to[0]},${to[1]}`
-    });
-    const res = await fetch(`${API_BASE}/route?${qs.toString()}`);
-    if (!res.ok) return { error: `route_${res.status}` };
-    const j = await res.json();
-    const coords = j.geometry?.coordinates;
-    if (!Array.isArray(coords) || coords.length < 2) return { error: 'route_empty' };
-    return { coordinates: coords };
-  };
+/** /api/route で 1 脚を解く routeLeg。座標は [lon, lat]、失敗時は { error }。 */
+async function loopRouteLeg(from, to) {
+  const qs = new URLSearchParams({ from: `${from[0]},${from[1]}`, to: `${to[0]},${to[1]}` });
+  const res = await fetch(`${API_BASE}/route?${qs.toString()}`);
+  if (!res.ok) return { error: `route_${res.status}` };
+  const j = await res.json();
+  const coords = j.geometry?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return { error: 'route_empty' };
+  return { coordinates: coords };
+}
 
-  // 変種（ループ 1 本）ごとに独立生成して、出来たものから順次描画する。
-  // 各脚の /api/route はタイル/経路のキャッシュが冷えていると遅いので、全本
-  // 揃うのを待たず、最初に完成した 1 本をすぐ選択して操作できるようにする。
+/**
+ * 中心 center・総距離 km・n 本で 1 回ぶん生成し、出来た本数を返す。
+ * 変種ごとに独立生成し、出来たものから順次描画（最初の 1 本を即選択）。
+ */
+async function tryGenerateLoops(center, km, n, loadToken, progressLabel) {
   loopCandidates = [];
   selectedLoopIndex = -1;
   renderLoopCandidates(); // 中心マーカーだけ先に出す
+  renderLoopCandidateList();
   const baseStep = 360 / n;
   let firstSelected = false;
   const tasks = [];
@@ -2609,7 +2604,7 @@ async function generateLoopsFromCenter(center, loadToken) {
     const direction = i % 2 === 0 ? 1 : -1;
     tasks.push(
       window.LoopCourse
-        .generateExtendedCourse(center, km, { bearingOffsetDeg, direction }, routeLeg)
+        .generateExtendedCourse(center, km, { bearingOffsetDeg, direction }, loopRouteLeg)
         .then((course) => {
           if (loadToken !== latestRouteLoadToken || !course) return;
           loopCandidates.push({
@@ -2624,18 +2619,54 @@ async function generateLoopsFromCenter(center, loadToken) {
             firstSelected = true;
             selectLoopCandidate(loopCandidates.length - 1);
           }
-          setStatus(`周回ルート生成中... (${loopCandidates.length}/${n} 本完成)`);
+          setStatus(`${progressLabel} (${loopCandidates.length}/${n} 本完成)`);
         })
         .catch(() => { /* この変種は捨てる */ })
     );
   }
   await Promise.all(tasks);
-  if (loadToken !== latestRouteLoadToken) return;
-  if (loopCandidates.length === 0) {
-    setStatus('この地点では周回ルートを生成できませんでした (地図データ範囲外 / 距離が大きすぎる可能性)');
+  return loopCandidates.length;
+}
+
+/**
+ * 指定した中心 [lon, lat] から、総距離 km × n 本の周回ルートを生成して候補を
+ * 地図と一覧に描画する。要求距離で 1 本も作れない場合は、エラーにせず距離を
+ * 段階的に縮めて再試行する（海・山・被覆端で大きいループが作れない地点でも
+ * 「少し短いループ」を返してUXを落とさない）。
+ *
+ * 生成ロジック（window.LoopCourse）はブラウザ側で動かし、各脚は /api/route の
+ * 並列リクエストで解く。広域でも個々の /api/route は別 isolate・小さな corridor
+ * CSR で走るので、サーバ 1 リクエストの 128MB/30s 上限を避けられる。
+ */
+async function generateLoopsFromCenter(center, loadToken) {
+  if (!window.LoopCourse) {
+    setStatus('周回ルート生成モジュールの初期化に失敗しました。再読み込みしてください');
     return;
   }
-  setStatus(`${loopCandidates.length} 本の周回ルートを生成しました`);
+  const requestedKm = Number(elements.loopKm?.value) || 100;
+  const n = Number(elements.loopCount?.value) || 3;
+  loopCenter = center;
+  manualPoints = [];
+
+  const ladder = loopDistanceLadder(requestedKm);
+  for (let i = 0; i < ladder.length; i += 1) {
+    const km = ladder[i];
+    const reduced = km < requestedKm;
+    setStatus(reduced
+      ? `${requestedKm}km は難しいため ${km}km で再生成中...`
+      : `周回ルートを生成中... (${km}km × ${n}本)`);
+    // eslint-disable-next-line no-await-in-loop
+    const count = await tryGenerateLoops(center, km, n, loadToken, `周回ルート生成中... (${km}km)`);
+    if (loadToken !== latestRouteLoadToken) return;
+    if (count > 0) {
+      setStatus(reduced
+        ? `${km}km で ${count} 本生成（${requestedKm}km はこの地点では難しく短縮）`
+        : `${count} 本の周回ルートを生成しました`);
+      return;
+    }
+  }
+  // 最小距離でも作れない = ほぼ道路のない地点。やわらかい案内に留める。
+  setStatus('この付近では道がなく周回ルートを作れませんでした。少し場所をずらしてタップしてください');
 }
 
 /** 「現在地から生成」: 端末の現在地を中心に周回ルートを生成する。 */
