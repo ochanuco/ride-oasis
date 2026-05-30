@@ -2531,7 +2531,8 @@ function renderLoopCandidateList() {
     dot.className = 'loop-candidate-dot';
     const label = document.createElement('span');
     const dist = Number.isFinite(c.distanceKm) ? `${c.distanceKm}km` : '—';
-    label.textContent = `コース${i + 1}: ${dist}`;
+    const kindLabel = c.kind === 'out-and-back' ? '往復' : '周回';
+    label.textContent = `コース${i + 1}: ${dist} (${kindLabel})`;
     btn.append(dot, label);
     btn.addEventListener('click', () => selectLoopCandidate(i));
     container.appendChild(btn);
@@ -2604,14 +2605,15 @@ async function tryGenerateLoops(center, km, n, loadToken, progressLabel) {
     const direction = i % 2 === 0 ? 1 : -1;
     tasks.push(
       window.LoopCourse
-        .generateExtendedCourse(center, km, { bearingOffsetDeg, direction }, loopRouteLeg)
+        .generateRouteCandidate(center, km, { bearingOffsetDeg, direction }, loopRouteLeg)
         .then((course) => {
           if (loadToken !== latestRouteLoadToken || !course) return;
           loopCandidates.push({
             coordinates: course.coordinates,
             distanceKm: Math.round(course.distanceKm * 100) / 100,
             direction: course.direction === 1 ? 'cw' : 'ccw',
-            converged: course.converged
+            converged: course.converged,
+            kind: course.kind || 'loop'
           });
           renderLoopCandidates();
           renderLoopCandidateList();

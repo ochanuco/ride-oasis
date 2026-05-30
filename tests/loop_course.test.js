@@ -7,6 +7,8 @@ const {
   generateLoopCourses,
   generateLoopCourse,
   generateExtendedCourse,
+  generateOutAndBackCourse,
+  generateRouteCandidate,
   petalCountFor,
   SINGLE_LOOP_MAX_KM,
   haversineKm,
@@ -186,6 +188,46 @@ test('generateExtendedCourse: 花びらの最大到達距離は単一円より�
   const maxReachKm = Math.max(...petal.coordinates.map((c) => haversineKm(CENTER, c)));
   // 単一円ループの最大到達は直径相当 ≈ 160/π/... ≈ 50km。花びらはその半分以下。
   assert.ok(maxReachKm < 30, `花びらの最大到達が小さい: ${maxReachKm.toFixed(1)}km`);
+});
+
+test('generateOutAndBackCourse: 総距離が目標に収束し往復で中心に戻る', async () => {
+  const r = await generateOutAndBackCourse(CENTER, 40, {}, straightLineRouteLeg());
+  assert.ok(r, '結果が返る');
+  assert.equal(r.kind, 'out-and-back');
+  assert.ok(Math.abs(r.distanceKm - 40) / 40 <= 0.1, `目標近傍: ${r.distanceKm}`);
+  const start = r.coordinates[0];
+  const end = r.coordinates[r.coordinates.length - 1];
+  assert.ok(haversineKm(start, CENTER) < 0.1, '始点が中心');
+  assert.ok(haversineKm(end, CENTER) < 0.1, '終点が中心（往復なのでぴったり戻る）');
+});
+
+test('generateRouteCandidate: ループが組めれば loop を返す', async () => {
+  // 直線 routeLeg ではループも往復も成立するが、収束ループを優先する。
+  const r = await generateRouteCandidate(CENTER, 40, {}, straightLineRouteLeg());
+  assert.ok(r, '結果が返る');
+  assert.equal(r.kind, 'loop');
+});
+
+test('generateRouteCandidate: ループ不可なら往復にフォールバックする', async () => {
+  // 1 方位（東 = bearing 90 付近）にしか道がない状況を模す routeLeg。
+  // 東向きの脚だけ直線を返し、それ以外は失敗させる。ループは全方位の脚が要る
+  // ので失敗 → 一直線に伸ばせる往復が返るはず。
+  const eastOnlyLeg = async (from, to) => {
+    const dLon = to[0] - from[0];
+    const dLat = to[1] - from[1];
+    // ほぼ東西方向の脚のみ許可
+    if (Math.abs(dLat) > Math.abs(dLon) * 0.5) return { error: 'no_road' };
+    const n = Math.max(1, Math.ceil(haversineKm(from, to)));
+    const coords = [];
+    for (let i = 0; i <= n; i += 1) {
+      const t = i / n;
+      coords.push([from[0] + dLon * t, from[1] + dLat * t]);
+    }
+    return { coordinates: coords };
+  };
+  const r = await generateRouteCandidate(CENTER, 40, { bearingOffsetDeg: 90 }, eastOnlyLeg);
+  assert.ok(r, '結果が返る');
+  assert.equal(r.kind, 'out-and-back', `往復になる: ${r.kind}`);
 });
 
 test('clampNumber/clampInt: 異常値は fallback / 範囲内に倒す', () => {

@@ -323,6 +323,92 @@
   }
 
   /**
+   * 往復（out-and-back）ルートを 1 本生成する。中心から基準方位へ「片道 ≈
+   * targetKm/2」のスパーク（複数脚に分割）を出し、その逆順を繋いで戻る。
+   * その方向に道さえあれば成立するので、海沿い・山際などループが組めない地点
+   * でも目標距離を満たしやすい。往路 spoke 長を反復補正して総距離 ±tolerance に
+   * 収束させる。作れない場合は null。
+   */
+  async function generateOutAndBackCourse(center, targetKm, opts, routeLeg) {
+    const {
+      bearingOffsetDeg = 0,
+      direction = 1,
+      tolerance = DEFAULT_TOLERANCE,
+      maxLegKm = MAX_LEG_KM,
+      maxIterations = MAX_ITERATIONS,
+      routeLegFactory
+    } = opts || {};
+
+    // generateLoopCourse と同様、factory があればこの変種専用の routeLeg を作る。
+    let leg = routeLeg;
+    if (typeof routeLegFactory === 'function') {
+      try {
+        leg = await routeLegFactory({ center, targetKm, bearingOffsetDeg, direction });
+      } catch (_) {
+        return null;
+      }
+    }
+    if (typeof leg !== 'function') return null;
+
+    // 片道目標は総距離の半分。道なりは直線より長いので spoke を少し短めに置く。
+    let spokeKm = (targetKm / 2) * INITIAL_RADIUS_FACTOR;
+    let best = null;
+
+    for (let iter = 0; iter < maxIterations; iter += 1) {
+      const turnaround = destinationPoint(center, bearingOffsetDeg, spokeKm);
+      const waypoints = splitLongLegs([center.slice(), turnaround], maxLegKm);
+      // eslint-disable-next-line no-await-in-loop
+      const legs = await routeAllLegs(waypoints, leg);
+      if (!legs) {
+        spokeKm *= 0.8;
+        continue;
+      }
+      const outCoords = stitchCoordinates(legs);
+      const onewayKm = polylineLengthKm(outCoords);
+      const totalKm = onewayKm * 2;
+      const errRatio = targetKm > 0 ? Math.abs(totalKm - targetKm) / targetKm : Infinity;
+      if (!best || errRatio < best.errRatio) {
+        // 復路は往路の逆順（折り返し点の重複を 1 個飛ばす）。終点は中心に戻る。
+        const back = outCoords.slice(0, -1).reverse();
+        best = {
+          coordinates: outCoords.concat(back),
+          distanceKm: totalKm,
+          errRatio,
+          iterations: iter + 1,
+          bearingOffsetDeg,
+          direction,
+          converged: errRatio <= tolerance,
+          kind: 'out-and-back'
+        };
+      }
+      if (errRatio <= tolerance) return best;
+      spokeKm *= clampNumber(targetKm / totalKm, 0.5, 2, 1);
+    }
+    return best;
+  }
+
+  /**
+   * 1 本の候補を生成する。まず周回ループ（必要なら花びら）を試し、収束しなければ
+   * 往復も試して、目標距離に近い／収束した方を返す。どちらも作れなければ null。
+   * 返り値に kind ('loop' | 'out-and-back') を含む。
+   */
+  async function generateRouteCandidate(center, targetKm, opts, routeLeg) {
+    const loop = await generateExtendedCourse(center, targetKm, opts, routeLeg);
+    if (loop && loop.converged) return { ...loop, kind: 'loop' };
+    const oab = await generateOutAndBackCourse(center, targetKm, opts, routeLeg);
+    const cands = [];
+    if (loop) cands.push({ ...loop, kind: 'loop' });
+    if (oab) cands.push(oab);
+    if (cands.length === 0) return null;
+    // 収束しているものを優先、その中で誤差が小さい順。
+    cands.sort((a, b) => {
+      if (!!a.converged !== !!b.converged) return a.converged ? -1 : 1;
+      return a.errRatio - b.errRatio;
+    });
+    return cands[0];
+  }
+
+  /**
    * 周回ルートを count 本生成する。基準方位を 360/count ずつ回転し、周回方向を
    * 交互に振って作り分ける。失敗に備えて余分な候補（半ステップずらし）を用意し、
    * 成功したものから count 本選ぶ。目標距離に近い順に並べて返す。
@@ -347,7 +433,7 @@
       });
     }
 
-    const run = (c) => generateExtendedCourse(center, tgt, { ...cfg, ...c }, routeLeg);
+    const run = (c) => generateRouteCandidate(center, tgt, { ...cfg, ...c }, routeLeg);
 
     // まず本命を並列実行。足りなければ予備を足す。
     let courses = (await Promise.all(primary.map(run))).filter(Boolean);
@@ -368,6 +454,8 @@
     generateLoopCourses,
     generateLoopCourse,
     generateExtendedCourse,
+    generateOutAndBackCourse,
+    generateRouteCandidate,
     petalCountFor,
     haversineKm,
     destinationPoint,
