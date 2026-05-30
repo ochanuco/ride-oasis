@@ -3150,14 +3150,20 @@ function bindEvents() {
         elements.followToggle.checked = false;
         stopFollowMode();
       }
-      if (mode !== 'loop' && loopCandidates.length > 0) {
-        // 周回モードを離れたら候補をクリアして描画も消す。
-        resetLoopState();
-        clearRouteVisualSources();
-        resetResults();
-        routeCoordinates = [];
-        updateRoutePointCount();
-        renderElevationChart();
+      if (mode !== 'loop') {
+        // 周回モードを離れたら、進行中の非同期生成を loadToken で無効化してから
+        // 候補・描画をクリアする（生成途中で抜けても後から候補が描かれない）。
+        latestRouteLoadToken += 1;
+        if (loopCandidates.length > 0) {
+          resetLoopState();
+          clearRouteVisualSources();
+          resetResults();
+          routeCoordinates = [];
+          updateRoutePointCount();
+          renderElevationChart();
+        } else {
+          resetLoopState();
+        }
       }
       syncSourceModeUi();
       if (mode === 'manual' && manualPoints.length === 0 && routeCoordinates.length === 0) {

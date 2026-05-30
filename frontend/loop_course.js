@@ -116,7 +116,9 @@
         Math.sin(br) * Math.sin(dr) * Math.cos(lat1),
         Math.cos(dr) - Math.sin(lat1) * Math.sin(lat2)
       );
-    return [toDeg(lon2), toDeg(lat2)];
+    // 経度を [-180, 180] に正規化（日付変更線付近でも妥当な値を返す）。
+    const lon = ((toDeg(lon2) + 540) % 360) - 180;
+    return [lon, toDeg(lat2)];
   }
 
   /** 座標列（[[lon,lat],...]）の総延長（km）。 */

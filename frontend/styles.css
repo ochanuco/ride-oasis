@@ -309,7 +309,7 @@ input[type="search"]::-webkit-search-cancel-button {
 
 .mode-chips {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--space-1);
   padding: 4px;
   background: var(--c-bg);
