@@ -33,7 +33,6 @@
   --tap-min: 44px;
 
   --top-bar-h: 48px;
-  --search-row-h: 56px;
   --results-collapsed-h: 56px;
   --results-expanded-h: 56vh;
 }
@@ -81,7 +80,7 @@ input[type="search"]::-webkit-search-cancel-button {
 /* ========== App grid ========== */
 .app {
   display: grid;
-  grid-template-rows: var(--top-bar-h) var(--search-row-h) auto 1fr auto;
+  grid-template-rows: var(--top-bar-h) auto 1fr auto;
   height: 100vh;
   height: 100dvh;
   background: var(--c-bg);
@@ -134,168 +133,6 @@ input[type="search"]::-webkit-search-cancel-button {
   text-overflow: ellipsis;
 }
 
-/* ========== Search row ========== */
-.search-row {
-  position: relative;
-  padding: var(--space-2) var(--space-4);
-  background: var(--c-surface);
-  border-bottom: 1px solid var(--c-line);
-  z-index: 30;
-}
-
-.geo-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  height: 40px;
-  padding: 0 var(--space-2) 0 var(--space-3);
-  border: 1px solid var(--c-line-strong);
-  border-radius: var(--r-pill);
-  background: var(--c-surface-muted);
-  transition: border-color 120ms ease, background 120ms ease;
-}
-
-.geo-search:focus-within {
-  border-color: var(--c-accent);
-  background: var(--c-surface);
-}
-
-.geo-search-icon {
-  flex-shrink: 0;
-  color: var(--c-ink-muted);
-  font-size: 14px;
-}
-
-.geo-search input[type="search"] {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  outline: none;
-  font-size: 15px;
-  padding: 0 var(--space-1);
-}
-
-.geo-search-clear {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--c-line);
-  color: var(--c-ink-muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.geo-search-clear:hover,
-.geo-search-clear:focus-visible {
-  background: var(--c-line-strong);
-}
-
-.geo-search-submit {
-  flex-shrink: 0;
-  height: 32px;
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--r-pill);
-  background: var(--c-accent);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.geo-search-submit:hover,
-.geo-search-submit:focus-visible {
-  background: var(--c-accent-strong);
-}
-
-.geo-search-results {
-  position: absolute;
-  top: calc(100% - 4px);
-  left: var(--space-4);
-  right: var(--space-4);
-  max-height: min(60vh, 360px);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  background: var(--c-surface);
-  border: 1px solid var(--c-line);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-lg);
-  overflow: auto;
-  z-index: 40;
-}
-
-.geo-search-result,
-.geo-search-empty {
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--c-line);
-  font-size: 13px;
-}
-
-.geo-search-result:first-child,
-.geo-search-empty:first-child {
-  border-top: 0;
-}
-
-.geo-search-result {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.geo-search-result-name {
-  color: var(--c-ink);
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.geo-search-result-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.geo-search-result-actions button {
-  flex: 1;
-  min-height: 36px;
-  padding: 6px 10px;
-  border: 1px solid var(--c-line-strong);
-  border-radius: var(--r-md);
-  background: var(--c-surface);
-  color: var(--c-ink);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.geo-search-result-actions button:hover,
-.geo-search-result-actions button:focus-visible {
-  border-color: var(--c-accent);
-  background: var(--c-accent-soft);
-  color: var(--c-accent-strong);
-}
-
-.geo-search-result-actions .geo-search-result-search {
-  background: var(--c-accent);
-  border-color: var(--c-accent);
-  color: #fff;
-}
-
-.geo-search-result-actions .geo-search-result-search:hover,
-.geo-search-result-actions .geo-search-result-search:focus-visible {
-  background: var(--c-accent-strong);
-  border-color: var(--c-accent-strong);
-  color: #fff;
-}
-
-.geo-search-empty {
-  color: var(--c-ink-muted);
-}
-
 /* ========== Mode bar ========== */
 .mode-bar {
   display: flex;
@@ -307,9 +144,31 @@ input[type="search"]::-webkit-search-cancel-button {
   z-index: 20;
 }
 
+/* モードを「検索/生成」の2グループに見せる。選択は4つで1つだけ（同じ radio name）。 */
+.mode-groups {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.mode-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--c-ink-muted);
+  letter-spacing: 0.02em;
+}
+
 .mode-chips {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-1);
   padding: 4px;
   background: var(--c-bg);
@@ -1096,24 +955,23 @@ input[type="search"]::-webkit-search-cancel-button {
 /* ========== Desktop refinements ========== */
 @media (min-width: 821px) {
   .app {
-    grid-template-rows: var(--top-bar-h) var(--search-row-h) auto 1fr;
+    grid-template-rows: var(--top-bar-h) auto 1fr;
     grid-template-columns: 1fr min(420px, 38%);
   }
 
   .top-bar,
-  .search-row,
   .mode-bar {
     grid-column: 1 / -1;
   }
 
   .map-shell {
-    grid-row: 4;
+    grid-row: 3;
     grid-column: 1;
     border-right: 1px solid var(--c-line);
   }
 
   .results-sheet {
-    grid-row: 4;
+    grid-row: 3;
     grid-column: 2;
     max-height: none;
     border-top: 0;
@@ -1144,27 +1002,16 @@ input[type="search"]::-webkit-search-cancel-button {
     font-size: 18px;
   }
 
-  .search-row,
-  .mode-bar {
-    padding-left: var(--space-5);
-    padding-right: var(--space-5);
-  }
-
-  .geo-search-results {
-    left: var(--space-5);
-    right: auto;
-    width: min(640px, calc(100% - var(--space-5) * 2));
-  }
-
   .mode-bar {
     flex-direction: row;
     align-items: center;
     gap: var(--space-4);
+    padding-left: var(--space-5);
+    padding-right: var(--space-5);
   }
 
-  .mode-chips {
+  .mode-groups {
     flex-shrink: 0;
-    width: 320px;
   }
 
   .ctx-panel:not(.inactive) {
@@ -1183,15 +1030,9 @@ input[type="search"]::-webkit-search-cancel-button {
     padding: 0 var(--space-3);
   }
 
-  .search-row,
   .mode-bar {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
-  }
-
-  .geo-search-results {
-    left: var(--space-3);
-    right: var(--space-3);
   }
 
   .brand-text {

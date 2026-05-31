@@ -18,41 +18,34 @@
         <div class="status" id="status" role="status" aria-live="polite">経路を指定してください</div>
       </header>
 
-      <section class="search-row">
-        <form class="geo-search" id="geo-search-form" autocomplete="off" role="search">
-          <span class="geo-search-icon" aria-hidden="true">🔍</span>
-          <input
-            id="geo-search-input"
-            type="search"
-            placeholder="地名で検索 (例: 箱根)"
-            autocomplete="off"
-            enterkeyhint="search"
-            aria-label="地名で検索"
-          />
-          <button id="geo-search-clear" type="button" class="geo-search-clear" hidden aria-label="検索語を消す">×</button>
-          <button type="submit" id="geo-search-submit" class="geo-search-submit">検索</button>
-        </form>
-        <ul id="geo-search-results" class="geo-search-results" hidden role="listbox"></ul>
-      </section>
-
       <section class="mode-bar">
-        <div class="mode-chips" role="radiogroup" aria-label="ルートの指定">
-          <label class="mode-chip">
-            <input type="radio" name="source-mode" value="gpx" checked />
-            <span>GPX</span>
-          </label>
-          <label class="mode-chip">
-            <input type="radio" name="source-mode" value="current" />
-            <span>現在地</span>
-          </label>
-          <label class="mode-chip">
-            <input type="radio" name="source-mode" value="manual" />
-            <span>手動2点</span>
-          </label>
-          <label class="mode-chip">
-            <input type="radio" name="source-mode" value="loop" />
-            <span>周回</span>
-          </label>
+        <div class="mode-groups" role="radiogroup" aria-label="ルートの指定">
+          <div class="mode-group">
+            <span class="mode-group-label">検索モード</span>
+            <div class="mode-chips">
+              <label class="mode-chip">
+                <input type="radio" name="source-mode" value="gpx" checked />
+                <span>GPX</span>
+              </label>
+              <label class="mode-chip">
+                <input type="radio" name="source-mode" value="current" />
+                <span>現在地</span>
+              </label>
+            </div>
+          </div>
+          <div class="mode-group">
+            <span class="mode-group-label">生成モード</span>
+            <div class="mode-chips">
+              <label class="mode-chip">
+                <input type="radio" name="source-mode" value="manual" />
+                <span>手動2点</span>
+              </label>
+              <label class="mode-chip">
+                <input type="radio" name="source-mode" value="loop" />
+                <span>周回</span>
+              </label>
+            </div>
+          </div>
         </div>
 
         <div class="mode-context">
