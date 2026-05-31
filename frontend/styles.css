@@ -1007,28 +1007,37 @@ input[type="search"]::-webkit-search-cancel-button {
     font-size: 18px;
   }
 
+  /* 上段ツールバー（モード選択＋近傍距離）と、下段の可変パネルを行で分離する。
+     周回で候補チップが増えてパネルが縦に伸びても上段が崩れない。
+     grid-area で DOM 順（groups→context→distance）に依存せず再配置。 */
   .mode-bar {
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    grid-template-areas:
+      "groups distance ."
+      "context context context";
     align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-3) var(--space-4);
+    column-gap: var(--space-4);
+    row-gap: var(--space-3);
     padding-left: var(--space-5);
     padding-right: var(--space-5);
   }
 
   .mode-groups {
-    flex-shrink: 0;
-  }
-
-  /* パネルは内容ぶんの幅にとどめ、行全体を左に詰める（広い画面で右端の
-     近傍距離との間に巨大な空白ができていたのを防ぐ）。 */
-  .ctx-panel:not(.inactive) {
-    flex: 0 1 auto;
+    grid-area: groups;
   }
 
   .distance-strip {
-    flex-shrink: 0;
+    grid-area: distance;
     width: 280px;
+  }
+
+  .mode-context {
+    /* 基本は display:contents（モバイルで panel を flex 直下に出すため）。
+       デスクトップでは grid item 化して context 行に全幅で置く。 */
+    display: block;
+    grid-area: context;
+    min-width: 0;
   }
 }
 
