@@ -1020,8 +1020,10 @@ input[type="search"]::-webkit-search-cancel-button {
     flex-shrink: 0;
   }
 
+  /* パネルは内容ぶんの幅にとどめ、行全体を左に詰める（広い画面で右端の
+     近傍距離との間に巨大な空白ができていたのを防ぐ）。 */
   .ctx-panel:not(.inactive) {
-    flex: 1;
+    flex: 0 1 auto;
   }
 
   .distance-strip {
