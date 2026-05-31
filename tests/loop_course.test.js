@@ -60,7 +60,8 @@ test('buildLoopVertices: 先頭と末尾が center でループが閉じる', ()
   const verts = buildLoopVertices(CENTER, 5, 8, 0, 1);
   assert.deepEqual(verts[0], CENTER);
   assert.deepEqual(verts[verts.length - 1], CENTER);
-  assert.equal(verts.length, 9); // center + (vertexCount-1) + center
+  // vertexCount=8 → 1(初回center) + 7(中間頂点) + 1(末尾center) = 9
+  assert.equal(verts.length, 9);
 });
 
 test('chooseVertexCount: 半径が大きいほど頂点が増える（脚を短く保つ）', () => {
@@ -110,7 +111,7 @@ test('generateLoopCourses: 既定で 3 本生成し、目標距離に近い順�
 test('generateLoopCourses: 作り分けた本数ぶん別方位になる', async () => {
   const out = await generateLoopCourses(CENTER, 80, 3, straightLineRouteLeg());
   const offsets = new Set(out.courses.map((c) => c.bearingOffsetDeg));
-  assert.ok(offsets.size >= 2, '少なくとも 2 種類の方位');
+  assert.equal(offsets.size, 3, '3 本とも異なる方位');
 });
 
 test('generateLoopCourses: km が 160 超なら 160 にクランプされる', async () => {
@@ -121,8 +122,10 @@ test('generateLoopCourses: km が 160 超なら 160 にクランプされる', a
 test('generateLoopCourses: n は 1〜3 にクランプされる', async () => {
   const tooMany = await generateLoopCourses(CENTER, 40, 10, straightLineRouteLeg());
   assert.equal(tooMany.requested, 3);
+  assert.equal(tooMany.courses.length, 3, '実際に 3 本生成される');
   const tooFew = await generateLoopCourses(CENTER, 40, 0, straightLineRouteLeg());
   assert.equal(tooFew.requested, 1);
+  assert.equal(tooFew.courses.length, 1, '実際に 1 本生成される');
 });
 
 test('generateLoopCourses: 全脚が失敗する routeLeg では 0 本を返す', async () => {
