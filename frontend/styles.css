@@ -462,8 +462,6 @@ input[type="search"]::-webkit-search-cancel-button {
 #loop-km {
   flex: 1 1 160px;
   min-width: 120px;
-  /* デスクトップ行で伸びすぎて近傍距離を押し出さないよう上限を設ける */
-  max-width: 240px;
   margin: 0;
   accent-color: var(--c-accent);
 }
@@ -1025,6 +1023,16 @@ input[type="search"]::-webkit-search-cancel-button {
   .ctx-panel:not(.inactive) {
     flex: 0 1 auto;
     min-width: 0;
+  }
+
+  /* 周回パネルだけは伸ばして、コントロール（総距離スライダー・本数・生成ボタン）を
+     1 行に収める。スライダーが余白を吸うので近傍距離との隙間も出ない。 */
+  #loop-panel:not(.inactive) {
+    flex: 1 1 auto;
+  }
+
+  .loop-controls {
+    flex-wrap: nowrap;
   }
 
   .distance-strip {
