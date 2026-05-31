@@ -2597,23 +2597,48 @@ function loopDistanceLadder(requestedKm) {
 // 1 脚の /api/route が冷えていると遅いことがあるが、ハングは避けたいので
 // タイムアウトを設ける（多数の脚を並列に投げるため、詰まると全体が止まる）。
 const LOOP_LEG_TIMEOUT_MS = 30000;
+// 進行中の周回生成用 AbortController。再生成・モード離脱で abort() して、
+// 結果の無効化(loadToken)だけでなく実際の /api/route fetch も中断する。
+let loopAbortController = null;
+
+/** この生成ぶんの fetch を中断するため、新しい AbortController を張り直す。 */
+function resetLoopAbort() {
+  if (loopAbortController) loopAbortController.abort();
+  loopAbortController = new AbortController();
+}
+
+/** 進行中の周回生成 fetch を中断する（モード離脱時など）。 */
+function abortLoopGeneration() {
+  if (loopAbortController) {
+    loopAbortController.abort();
+    loopAbortController = null;
+  }
+}
 
 /** /api/route で 1 脚を解く routeLeg。座標は [lon, lat]、失敗時は { error }。 */
 async function loopRouteLeg(from, to) {
   const qs = new URLSearchParams({ from: `${from[0]},${from[1]}`, to: `${to[0]},${to[1]}` });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LOOP_LEG_TIMEOUT_MS);
+  // 脚は「生成全体のキャンセル」または「自身のタイムアウト」のどちらでも中断する。
+  const legCtrl = new AbortController();
+  const genSignal = loopAbortController ? loopAbortController.signal : null;
+  const onGenAbort = () => legCtrl.abort();
+  if (genSignal) {
+    if (genSignal.aborted) legCtrl.abort();
+    else genSignal.addEventListener('abort', onGenAbort, { once: true });
+  }
+  const timer = setTimeout(() => legCtrl.abort(), LOOP_LEG_TIMEOUT_MS);
   try {
-    const res = await fetch(`${API_BASE}/route?${qs.toString()}`, { signal: controller.signal });
+    const res = await fetch(`${API_BASE}/route?${qs.toString()}`, { signal: legCtrl.signal });
     if (!res.ok) return { error: `route_${res.status}` };
     const j = await res.json();
     const coords = j.geometry?.coordinates;
     if (!Array.isArray(coords) || coords.length < 2) return { error: 'route_empty' };
     return { coordinates: coords };
   } catch (e) {
-    return { error: e?.name === 'AbortError' ? 'route_timeout' : 'route_failed' };
+    return { error: e?.name === 'AbortError' ? 'route_aborted' : 'route_failed' };
   } finally {
     clearTimeout(timer);
+    if (genSignal) genSignal.removeEventListener('abort', onGenAbort);
   }
 }
 
@@ -2699,6 +2724,8 @@ async function generateLoopsFromCenter(center, loadToken) {
   const n = Number(elements.loopCount?.value) || 3;
   loopCenter = center;
   manualPoints = [];
+  // 前回の生成が走っていれば fetch ごと中断し、この生成用の controller を張る。
+  resetLoopAbort();
   // この生成ぶんのゆらぎ。押すたびに seed と全体方位が変わり、同じ場所・距離でも
   // 違うルートになる（毎週末の飽き防止が本機能の目的）。
   const seed = Math.floor(Math.random() * 1e9);
@@ -3163,9 +3190,10 @@ function bindEvents() {
         stopFollowMode();
       }
       if (mode !== 'loop') {
-        // 周回モードを離れたら、進行中の非同期生成を loadToken で無効化してから
-        // 候補・描画をクリアする（生成途中で抜けても後から候補が描かれない）。
+        // 周回モードを離れたら、進行中の非同期生成を loadToken で無効化し、さらに
+        // 実際の /api/route fetch も abort してからクリアする（無駄な通信を残さない）。
         latestRouteLoadToken += 1;
+        abortLoopGeneration();
         if (loopCandidates.length > 0) {
           resetLoopState();
           clearRouteVisualSources();
