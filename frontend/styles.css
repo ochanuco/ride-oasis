@@ -462,6 +462,8 @@ input[type="search"]::-webkit-search-cancel-button {
 #loop-km {
   flex: 1 1 160px;
   min-width: 120px;
+  /* デスクトップ行で伸びすぎて近傍距離を押し出さないよう上限を設ける */
+  max-width: 240px;
   margin: 0;
   accent-color: var(--c-accent);
 }
@@ -1008,7 +1010,8 @@ input[type="search"]::-webkit-search-cancel-button {
   .mode-bar {
     flex-direction: row;
     align-items: center;
-    gap: var(--space-4);
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-4);
     padding-left: var(--space-5);
     padding-right: var(--space-5);
   }
