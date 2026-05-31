@@ -24,6 +24,12 @@ const elements = {
   currentLocationPanel: document.getElementById('current-location-panel'),
   manualPanel: document.getElementById('manual-panel'),
   manualReset: document.getElementById('manual-reset'),
+  loopPanel: document.getElementById('loop-panel'),
+  loopKm: document.getElementById('loop-km'),
+  loopKmCurrent: document.getElementById('loop-km-current'),
+  loopCount: document.getElementById('loop-count'),
+  loopGenerate: document.getElementById('loop-generate'),
+  loopCandidates: document.getElementById('loop-candidates'),
   gpxFileName: document.getElementById('gpx-file-name'),
   routePointCount: document.getElementById('route-point-count'),
   distanceThreshold: document.getElementById('distance-threshold'),
@@ -96,9 +102,37 @@ const ROUTE_STYLES = {
     stroke: new ol.style.Stroke({ color: '#c0392b', width: 3, lineDash: [6, 4] })
   })
 };
+// 周回ルート (loop) の候補ごとの色。選択中は太い実線、未選択も実線だが細め。
+// 補給地点ドットや地図に埋もれないよう、白いケーシング（縁取り）を下に敷く。
+const LOOP_COLORS = ['#e6550d', '#1a8a3f', '#6a51c9'];
+function loopCandidateStyle(color, selected) {
+  const w = selected ? 6 : 4;
+  return [
+    // 白ケーシング（視認性向上）
+    new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.9)', width: w + 3 })
+    }),
+    // 本体（未選択は少し薄く）
+    new ol.style.Style({
+      stroke: new ol.style.Stroke({
+        color: selected ? color : `${color}cc`,
+        width: w
+      })
+    })
+  ];
+}
+
 const routeLayer = new ol.layer.Vector({
   source: routeSource,
   style(feature) {
+    // loop 候補は専用色（segmentState より優先）。
+    const loopIndex = feature.get('loopIndex');
+    if (loopIndex != null) {
+      return loopCandidateStyle(
+        feature.get('loopColor') || LOOP_COLORS[0],
+        feature.get('loopSelected') === true
+      );
+    }
     const state = feature.get('segmentState');
     if (state && ROUTE_STYLES[state]) return ROUTE_STYLES[state];
     return ROUTE_STYLES.computed;
@@ -201,8 +235,10 @@ const map = new ol.Map({
   target: 'map',
   layers: [
     new ol.layer.Tile({ source: new ol.source.OSM() }),
-    routeLayer,
+    // ルート線は補給地点ドットより上に描く。下にあると 100 件超のドットに
+    // 埋もれて「ルートが出ていない」ように見える（周回モードで顕著）。
     pointLayer,
+    routeLayer,
     endpointLayer,
     currentLocationLayer,
     coursePointLayer,
@@ -248,6 +284,13 @@ let manualPoints = [];
 //   coords: state=computed の時のみ [[lon,lat]...]、それ以外は null
 const MAX_MANUAL_STRAIGHT_KM = 25;
 let manualSegments = [];
+// 周回ルート (loop) モードの状態。
+//   loopCandidates: API が返した各ループ { coordinates, distanceKm, ... }
+//   loopCenter: 生成に使った現在地 [lon, lat]
+//   selectedLoopIndex: 選択中の候補 index（補給地点マッチ対象）
+let loopCandidates = [];
+let loopCenter = null;
+let selectedLoopIndex = -1;
 let cachedCoursePoints = [];
 let disabledCoursePointTypes = new Set();
 let currentRwgId = null;
@@ -326,9 +369,11 @@ function syncSourceModeUi() {
   elements.gpxFile.disabled = mode !== 'gpx';
   elements.useCurrentLocation.disabled = mode !== 'current';
   elements.manualReset.disabled = mode !== 'manual';
+  if (elements.loopGenerate) elements.loopGenerate.disabled = mode !== 'loop';
   elements.gpxPanel.classList.toggle('inactive', mode !== 'gpx');
   elements.currentLocationPanel.classList.toggle('inactive', mode !== 'current');
   elements.manualPanel.classList.toggle('inactive', mode !== 'manual');
+  if (elements.loopPanel) elements.loopPanel.classList.toggle('inactive', mode !== 'loop');
 }
 
 /** Resets visible and cached result points before a new search. */
@@ -2442,6 +2487,327 @@ async function handleCurrentLocation() {
   }
 }
 
+/** 周回ルートの距離スライダー表示 (例: "100km") を同期する。 */
+function syncLoopKmUi() {
+  if (elements.loopKm && elements.loopKmCurrent) {
+    elements.loopKmCurrent.textContent = `${elements.loopKm.value}km`;
+  }
+}
+
+/** 周回ルートの候補データ・選択状態・一覧 DOM をクリアする。 */
+function resetLoopState() {
+  loopCandidates = [];
+  loopCenter = null;
+  selectedLoopIndex = -1;
+  if (elements.loopCandidates) elements.loopCandidates.innerHTML = '';
+}
+
+/** 候補ループを地図に描画する（中心マーカー + 各候補の LineString）。 */
+function renderLoopCandidates() {
+  clearRouteVisualSources();
+  if (loopCenter) {
+    currentLocationSource.addFeature(
+      new ol.Feature({ geometry: new ol.geom.Point(ol.proj.fromLonLat(loopCenter)) })
+    );
+  }
+  for (let i = 0; i < loopCandidates.length; i += 1) {
+    const c = loopCandidates[i];
+    const feature = routeGeoJsonFormat.readFeature({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: c.coordinates },
+      properties: {}
+    });
+    feature.set('loopIndex', i);
+    feature.set('loopColor', LOOP_COLORS[i % LOOP_COLORS.length]);
+    feature.set('loopSelected', i === selectedLoopIndex);
+    c.feature = feature;
+    routeSource.addFeature(feature);
+  }
+  fitToVisibleData();
+}
+
+/** 候補ループの選択ボタン一覧を描画する。 */
+function renderLoopCandidateList() {
+  const container = elements.loopCandidates;
+  if (!container) return;
+  container.innerHTML = '';
+  if (loopCandidates.length > 0) {
+    // 補給地点の件数表示に status を奪われても本数が分かるよう、常設の見出し。
+    const head = document.createElement('div');
+    head.className = 'loop-candidates-head';
+    head.textContent = `生成コース ${loopCandidates.length} 本（タップで切替）`;
+    container.appendChild(head);
+  }
+  loopCandidates.forEach((c, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'loop-candidate-item';
+    if (i === selectedLoopIndex) btn.classList.add('active');
+    btn.style.setProperty('--loop-color', LOOP_COLORS[i % LOOP_COLORS.length]);
+    const dot = document.createElement('span');
+    dot.className = 'loop-candidate-dot';
+    const label = document.createElement('span');
+    const dist = Number.isFinite(c.distanceKm) ? `${c.distanceKm}km` : '—';
+    const kindLabel = c.kind === 'out-and-back' ? '往復' : '周回';
+    label.textContent = `コース${i + 1}: ${dist} (${kindLabel})`;
+    btn.append(dot, label);
+    btn.addEventListener('click', () => selectLoopCandidate(i));
+    container.appendChild(btn);
+  });
+}
+
+/** 候補ループを 1 本選び、active route として補給地点マッチを走らせる。 */
+function selectLoopCandidate(index) {
+  if (index < 0 || index >= loopCandidates.length) return;
+  selectedLoopIndex = index;
+  for (let i = 0; i < loopCandidates.length; i += 1) {
+    const f = loopCandidates[i].feature;
+    if (f) f.set('loopSelected', i === index);
+  }
+  routeLayer.changed();
+
+  const c = loopCandidates[index];
+  routeFeature = null;
+  routeCoordinates = c.coordinates.slice();
+  routeElevations = [];
+  rebuildRouteElevationCache();
+  updateRoutePointCount();
+  renderElevationChart();
+  renderLoopCandidateList();
+  syncUrlState();
+  // 既存の補給地点マッチパイプラインを再利用（routeSource の候補ラインは保持）。
+  refreshMap([...routeCoordinates]);
+}
+
+// フォールバックで距離を縮める下限と段階（要求距離に対する係数）。
+const LOOP_MIN_FALLBACK_KM = 10;
+const LOOP_FALLBACK_FACTORS = [1, 0.7, 0.5, 0.35, 0.2];
+
+/** 要求距離から、降順・重複なし・下限以上の「試す距離」ラダーを作る。 */
+function loopDistanceLadder(requestedKm) {
+  const set = new Set();
+  for (const f of LOOP_FALLBACK_FACTORS) {
+    const km = Math.max(LOOP_MIN_FALLBACK_KM, Math.round((requestedKm * f) / 5) * 5);
+    if (km <= requestedKm) set.add(km);
+  }
+  set.add(Math.min(requestedKm, LOOP_MIN_FALLBACK_KM)); // 必ず下限も試す
+  return Array.from(set).sort((a, b) => b - a);
+}
+
+// 1 脚の /api/route が冷えていると遅いことがあるが、ハングは避けたいので
+// タイムアウトを設ける（多数の脚を並列に投げるため、詰まると全体が止まる）。
+const LOOP_LEG_TIMEOUT_MS = 30000;
+// 進行中の周回生成用 AbortController。再生成・モード離脱で abort() して、
+// 結果の無効化(loadToken)だけでなく実際の /api/route fetch も中断する。
+let loopAbortController = null;
+
+/** この生成ぶんの fetch を中断するため、新しい AbortController を張り直す。 */
+function resetLoopAbort() {
+  if (loopAbortController) loopAbortController.abort();
+  loopAbortController = new AbortController();
+}
+
+/** 進行中の周回生成 fetch を中断する（モード離脱時など）。 */
+function abortLoopGeneration() {
+  if (loopAbortController) {
+    loopAbortController.abort();
+    loopAbortController = null;
+  }
+}
+
+/** /api/route で 1 脚を解く routeLeg。座標は [lon, lat]、失敗時は { error }。 */
+async function loopRouteLeg(from, to) {
+  const qs = new URLSearchParams({ from: `${from[0]},${from[1]}`, to: `${to[0]},${to[1]}` });
+  // 脚は「生成全体のキャンセル」または「自身のタイムアウト」のどちらでも中断する。
+  const legCtrl = new AbortController();
+  const genSignal = loopAbortController ? loopAbortController.signal : null;
+  const onGenAbort = () => legCtrl.abort();
+  if (genSignal) {
+    if (genSignal.aborted) legCtrl.abort();
+    else genSignal.addEventListener('abort', onGenAbort, { once: true });
+  }
+  const timer = setTimeout(() => legCtrl.abort(), LOOP_LEG_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/route?${qs.toString()}`, { signal: legCtrl.signal });
+    if (!res.ok) return { error: `route_${res.status}` };
+    const j = await res.json();
+    const coords = j.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) return { error: 'route_empty' };
+    return { coordinates: coords };
+  } catch (e) {
+    return { error: e?.name === 'AbortError' ? 'route_aborted' : 'route_failed' };
+  } finally {
+    clearTimeout(timer);
+    if (genSignal) genSignal.removeEventListener('abort', onGenAbort);
+  }
+}
+
+/**
+ * 中心 center・総距離 km・n 本で 1 回ぶん生成し、出来た本数を返す。
+ * 変種ごとに独立生成し、出来たものから順次描画（最初の 1 本を即選択）。
+ * seed / baseRot で毎回ルートを揺らがせる（同じ場所・距離でも違うルートに）。
+ */
+async function tryGenerateLoops(center, km, n, loadToken, progressLabel, seed, baseRot) {
+  loopCandidates = [];
+  selectedLoopIndex = -1;
+  renderLoopCandidates(); // 中心マーカーだけ先に出す
+  renderLoopCandidateList();
+  const baseStep = 360 / n;
+  let firstSelected = false;
+
+  // 方位プール: 本命 n 本 + 予備（半ステップ/三分割ずらし）。ある方位が海・山で
+  // 作れなくても、別方位を追加で試して要求本数 n を埋める（本数を減らさない）。
+  const pool = [];
+  for (let i = 0; i < n; i += 1) pool.push({ b: baseRot + baseStep * i, dir: i % 2 === 0 ? 1 : -1, salt: i });
+  for (let i = 0; i < n; i += 1) pool.push({ b: baseRot + baseStep * i + baseStep / 2, dir: i % 2 === 0 ? -1 : 1, salt: n + i });
+  for (let i = 0; i < n; i += 1) pool.push({ b: baseRot + baseStep * i + baseStep / 3, dir: 1, salt: 2 * n + i });
+
+  const addCandidate = (course) => {
+    if (loadToken !== latestRouteLoadToken || !course) return;
+    loopCandidates.push({
+      coordinates: course.coordinates,
+      distanceKm: Math.round(course.distanceKm * 100) / 100,
+      direction: course.direction === 1 ? 'cw' : 'ccw',
+      converged: course.converged,
+      kind: course.kind || 'loop'
+    });
+    renderLoopCandidates();
+    renderLoopCandidateList();
+    if (!firstSelected) {
+      firstSelected = true;
+      selectLoopCandidate(loopCandidates.length - 1);
+    }
+    setStatus(`${progressLabel} (${loopCandidates.length}/${n} 本完成)`);
+  };
+
+  // 不足ぶんを波状に追加投入して n 本まで埋める。
+  let idx = 0;
+  while (loopCandidates.length < n && idx < pool.length) {
+    const need = n - loopCandidates.length;
+    const batch = pool.slice(idx, idx + need);
+    idx += batch.length;
+    // eslint-disable-next-line no-await-in-loop
+    const results = await Promise.all(
+      batch.map((s) =>
+        window.LoopCourse
+          .generateRouteCandidate(
+            center,
+            km,
+            { bearingOffsetDeg: Math.round(s.b), direction: s.dir, seed: seed + s.salt * 1000 },
+            loopRouteLeg
+          )
+          .catch(() => null)
+      )
+    );
+    if (loadToken !== latestRouteLoadToken) return loopCandidates.length;
+    for (const c of results) addCandidate(c);
+  }
+  return loopCandidates.length;
+}
+
+/**
+ * 指定した中心 [lon, lat] から、総距離 km × n 本の周回ルートを生成して候補を
+ * 地図と一覧に描画する。要求距離で 1 本も作れない場合は、エラーにせず距離を
+ * 段階的に縮めて再試行する（海・山・被覆端で大きいループが作れない地点でも
+ * 「少し短いループ」を返してUXを落とさない）。
+ *
+ * 生成ロジック（window.LoopCourse）はブラウザ側で動かし、各脚は /api/route の
+ * 並列リクエストで解く。広域でも個々の /api/route は別 isolate・小さな corridor
+ * CSR で走るので、サーバ 1 リクエストの 128MB/30s 上限を避けられる。
+ */
+async function generateLoopsFromCenter(center, loadToken) {
+  if (!window.LoopCourse) {
+    setStatus('周回ルート生成モジュールの初期化に失敗しました。再読み込みしてください');
+    return;
+  }
+  const requestedKm = Number(elements.loopKm?.value) || 100;
+  const n = Number(elements.loopCount?.value) || 3;
+  loopCenter = center;
+  manualPoints = [];
+  // 前回の生成が走っていれば fetch ごと中断し、この生成用の controller を張る。
+  resetLoopAbort();
+  // この生成ぶんのゆらぎ。押すたびに seed と全体方位が変わり、同じ場所・距離でも
+  // 違うルートになる（毎週末の飽き防止が本機能の目的）。
+  const seed = Math.floor(Math.random() * 1e9);
+  const baseRot = Math.random() * 360;
+
+  const ladder = loopDistanceLadder(requestedKm);
+  for (let i = 0; i < ladder.length; i += 1) {
+    const km = ladder[i];
+    const reduced = km < requestedKm;
+    setStatus(reduced
+      ? `${requestedKm}km は難しいため ${km}km で再生成中...`
+      : `周回ルートを生成中... (${km}km × ${n}本)`);
+    // eslint-disable-next-line no-await-in-loop
+    const count = await tryGenerateLoops(center, km, n, loadToken, `周回ルート生成中... (${km}km)`, seed, baseRot);
+    if (loadToken !== latestRouteLoadToken) return;
+    if (count > 0) {
+      setStatus(reduced
+        ? `${km}km で ${count} 本生成（${requestedKm}km はこの地点では難しく短縮）`
+        : `${count} 本の周回ルートを生成しました`);
+      return;
+    }
+  }
+  // 最小距離でも作れない = ほぼ道路のない地点。やわらかい案内に留める。
+  setStatus('この付近では道がなく周回ルートを作れませんでした。少し場所をずらしてタップしてください');
+}
+
+/** 「現在地から生成」: 端末の現在地を中心に周回ルートを生成する。 */
+async function handleGenerateLoop() {
+  if (!navigator.geolocation) {
+    setStatus('このブラウザは現在地取得に対応していません');
+    return;
+  }
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  if (elements.loopGenerate) elements.loopGenerate.disabled = true;
+  setStatus('現在地を取得中...');
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
+      });
+    });
+    if (loadToken !== latestRouteLoadToken) return;
+    const center = [position.coords.longitude, position.coords.latitude];
+    await generateLoopsFromCenter(center, loadToken);
+  } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
+    const message = error?.code === 1
+      ? '位置情報の利用が許可されていません'
+      : error?.code === 3
+        ? '現在地の取得がタイムアウトしました'
+        : '周回ルートの生成に失敗しました';
+    setStatus(message);
+    console.error(error);
+  } finally {
+    if (selectedSourceMode() === 'loop' && elements.loopGenerate) {
+      elements.loopGenerate.disabled = false;
+    }
+  }
+}
+
+/** 周回モードで地図をタップしたとき: その地点を開始地点として周回ルートを生成する。 */
+async function handleLoopMapClick(mapCoord) {
+  const center = ol.proj.toLonLat(mapCoord);
+  const loadToken = ++latestRouteLoadToken;
+  cancelPendingRefreshes();
+  if (elements.loopGenerate) elements.loopGenerate.disabled = true;
+  try {
+    await generateLoopsFromCenter(center, loadToken);
+  } catch (error) {
+    if (loadToken !== latestRouteLoadToken) return;
+    setStatus('周回ルートの生成に失敗しました');
+    console.error(error);
+  } finally {
+    if (selectedSourceMode() === 'loop' && elements.loopGenerate) {
+      elements.loopGenerate.disabled = false;
+    }
+  }
+}
+
 /** Marks rendered point features that fall in the forward cone of the follow heading. */
 function applyForwardEmphasis() {
   if (followBearingDeg === null || !followLastCoord) {
@@ -2823,9 +3189,28 @@ function bindEvents() {
         elements.followToggle.checked = false;
         stopFollowMode();
       }
+      if (mode !== 'loop') {
+        // 周回モードを離れたら、進行中の非同期生成を loadToken で無効化し、さらに
+        // 実際の /api/route fetch も abort してからクリアする（無駄な通信を残さない）。
+        latestRouteLoadToken += 1;
+        abortLoopGeneration();
+        if (loopCandidates.length > 0) {
+          resetLoopState();
+          clearRouteVisualSources();
+          resetResults();
+          routeCoordinates = [];
+          updateRoutePointCount();
+          renderElevationChart();
+        } else {
+          resetLoopState();
+        }
+      }
       syncSourceModeUi();
       if (mode === 'manual' && manualPoints.length === 0 && routeCoordinates.length === 0) {
         setStatus('地図をクリックして出発地を指定してください');
+      }
+      if (mode === 'loop') {
+        setStatus('総距離と本数を選び、地図をタップして開始地点を指定するか「現在地から生成」を押してください');
       }
     });
   }
@@ -2849,6 +3234,12 @@ function bindEvents() {
   elements.useCurrentLocation.addEventListener('click', handleCurrentLocation);
   elements.followToggle.addEventListener('change', handleFollowToggle);
   elements.manualReset.addEventListener('click', resetManualState);
+  if (elements.loopGenerate) {
+    elements.loopGenerate.addEventListener('click', handleGenerateLoop);
+  }
+  if (elements.loopKm) {
+    elements.loopKm.addEventListener('input', syncLoopKmUi);
+  }
   elements.geoSearchForm.addEventListener('submit', handleGeoSearchSubmit);
   elements.geoSearchInput.addEventListener('input', handleGeoSearchInput);
   elements.geoSearchClear.addEventListener('click', handleGeoSearchClear);
@@ -2955,6 +3346,11 @@ function bindEvents() {
       return;
     }
     clearPopup();
+    if (selectedSourceMode() === 'loop') {
+      // 周回モード: タップした地点を開始地点として生成する。
+      handleLoopMapClick(event.coordinate);
+      return;
+    }
     if (selectedSourceMode() === 'manual') {
       // 灰色 segment 上のクリックは waypoint 挿入 (>25km の分割)
       const segFeature = map.forEachFeatureAtPixel(
@@ -3005,7 +3401,13 @@ function bindEvents() {
   const mapTarget = map.getTargetElement();
   map.on('pointermove', (event) => {
     if (event.dragging) return;
-    if (selectedSourceMode() !== 'manual') {
+    const mode = selectedSourceMode();
+    if (mode === 'loop') {
+      // 周回モードはタップで開始地点を選べるので crosshair を出す。
+      mapTarget.style.cursor = 'crosshair';
+      return;
+    }
+    if (mode !== 'manual') {
       mapTarget.style.cursor = '';
       return;
     }
@@ -3036,6 +3438,7 @@ function bindEvents() {
 syncSourceModeUi();
 updateRoutePointCount();
 syncDistanceUi();
+syncLoopKmUi();
 buildPointList([]);
 updateSummary(0);
 syncCueSheetButton();
