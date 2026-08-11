@@ -40,6 +40,8 @@ function parseBbox(str) {
   return { minLon: nums[0], minLat: nums[1], maxLon: nums[2], maxLat: nums[3] };
 }
 
+// onLine を await する。呼び出し側が書き込みの drain を待てるようにして、
+// 1GB 級の ndjson でも出力側のバッファが際限なく膨らまないようにする。
 async function streamLines(filePath, onLine) {
   const rl = readline.createInterface({
     input: fs.createReadStream(filePath, { encoding: 'utf8' }),
@@ -47,8 +49,13 @@ async function streamLines(filePath, onLine) {
   });
   for await (const line of rl) {
     if (!line) continue;
-    onLine(line);
+    await onLine(line);
   }
+}
+
+/** write() が false を返したら drain を待つ (バックプレッシャー)。 */
+async function writeLine(stream, line) {
+  if (!stream.write(line + '\n')) await once(stream, 'drain');
 }
 
 async function main() {
@@ -67,6 +74,14 @@ async function main() {
     return;
   }
 
+  // src と dst が同じだと、読みながら同じファイルを truncate して元データを
+  // 壊す。1GB 級の抽出元を失うと再取得コストが大きいので、書き始める前に弾く。
+  if (path.resolve(args.src) === path.resolve(args.dst)) {
+    process.stderr.write('--src and --dst must differ (would overwrite the source)\n');
+    process.exitCode = 1;
+    return;
+  }
+
   fs.mkdirSync(args.dst, { recursive: true });
 
   const t0 = Date.now();
@@ -76,8 +91,7 @@ async function main() {
   process.stderr.write('[pass 1/2] filtering nodes by bbox\n');
   let nodesSeen = 0;
   let nodesKept = 0;
-  let writes = 0;
-  await streamLines(path.join(args.src, 'nodes.ndjson'), (line) => {
+  await streamLines(path.join(args.src, 'nodes.ndjson'), async (line) => {
     nodesSeen += 1;
     const n = JSON.parse(line);
     if (
@@ -85,9 +99,8 @@ async function main() {
       n.lat >= bbox.minLat && n.lat <= bbox.maxLat
     ) {
       keepIds.add(n.id);
-      nodesOut.write(line + '\n');
+      await writeLine(nodesOut, line);
       nodesKept += 1;
-      writes += 1;
     }
   });
   nodesOut.end();
@@ -99,11 +112,11 @@ async function main() {
   let edgesKept = 0;
   const t1 = Date.now();
   process.stderr.write('[pass 2/2] filtering edges (both endpoints in bbox)\n');
-  await streamLines(path.join(args.src, 'edges.ndjson'), (line) => {
+  await streamLines(path.join(args.src, 'edges.ndjson'), async (line) => {
     edgesSeen += 1;
     const e = JSON.parse(line);
     if (keepIds.has(e.from) && keepIds.has(e.to)) {
-      edgesOut.write(line + '\n');
+      await writeLine(edgesOut, line);
       edgesKept += 1;
     }
   });
