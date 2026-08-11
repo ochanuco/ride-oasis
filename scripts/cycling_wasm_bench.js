@@ -5,12 +5,12 @@
 // existing JS CSR-only path (lib/cycling/chquery_csr.js).
 //
 // Usage:
-//   wasm-pack build rust-router --release --target nodejs --out-dir pkg-node
+//   npm run wasm:fetch  (ochanuco/cycling-router の Release から取得)
 //   node --expose-gc scripts/cycling_wasm_bench.js --from 135.49,34.69 --to 135.52,34.71
 
 const fs = require('fs');
 const path = require('path');
-const { route_ch } = require('../rust-router/pkg-node/rust_router.js');
+const { route_ch } = require('../vendor/wasm/nodejs/router_wasm.js');
 const { corridorKeys, neighborhoodKeys } = require('../lib/cycling/tile_partition');
 
 function parseLonLat(s) {

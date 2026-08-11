@@ -18,6 +18,13 @@ preview_urls = true
 pattern = "oasis.ochanu.co"
 custom_domain = true
 
+# WASM router は ochanuco/cycling-router の GitHub Release から取得する。
+# deploy / dev の前に走り、vendor/wasm/ (Worker 用) と frontend/wasm/
+# (ブラウザ用) を揃える。どちらも git 管理外なので、この step が失敗したら
+# ビルドを止める必要がある (scripts/fetch_wasm.mjs は欠品時に exit 1)。
+[build]
+command = "npm run wasm:fetch"
+
 # Static frontend served straight from frontend/. The Worker only intercepts
 # the supply-point API; everything else falls through to the asset bundle.
 [assets]
@@ -25,7 +32,7 @@ directory = "frontend"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
-# Rust WASM router (rust-router/pkg/rust_router_bg.wasm).
+# Rust WASM router (vendor/wasm/bundler/router_wasm_bg.wasm).
 # Workers Builds (Cloudflare's CI) requires `[[rules]]` to bundle .wasm files
 # imported by JS as CompiledWasm modules. ローカル wrangler dev/deploy では
 # 暗黙に動くが、Workers Builds の bundler は明示が必要。
