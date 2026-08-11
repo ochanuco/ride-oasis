@@ -10,6 +10,8 @@ test-results/
 data/
 .local/
 .wrangler/
+# wrangler --dry-run のビルド出力 (worker.js / source map / wasm)
+.dryrun/
 cloudflare/seed.sql
 
 # WASM 成果物は ochanuco/cycling-router の GitHub Release から取得する。
