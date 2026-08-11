@@ -180,3 +180,20 @@ test('抽出: 入力 ndjson が無ければ異常終了する (無言で 0 件�
 
   assert.throws(() => runExtract(src, path.join(dir, 'dst'), '135.4,34.6,135.6,34.8'));
 });
+
+test('抽出: 出力先に書けない場合も異常終了する', (t) => {
+  const nodes = [{ id: 1, lon: 135.5, lat: 34.7 }];
+  const { dir, src, dst } = makeFixture(nodes, []);
+  t.after(() => {
+    fs.chmodSync(dst, 0o755);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  // 出力ディレクトリを読み取り専用にして createWriteStream を失敗させる。
+  // 'error' に購読者がいないと Node がプロセスごと落とすため、main().catch まで
+  // 届くことをここで担保する。
+  fs.mkdirSync(dst, { recursive: true });
+  fs.chmodSync(dst, 0o500);
+
+  assert.throws(() => runExtract(src, dst, '135.4,34.6,135.6,34.8'));
+});

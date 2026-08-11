@@ -83,6 +83,44 @@ function canonicalPath(p) {
   }
 }
 
+/**
+ * srcFile を 1 行ずつ読み、keepLine が true を返した行だけ dstFile に書く。
+ * 返り値は { seen, kept }。
+ *
+ * 出力ストリームの error は生成直後に購読する。write() は成功しても後から
+ * ENOSPC 等で落ちることがあり、'error' に購読者がいないと Node が例外を
+ * 投げてプロセスごと死ぬ (main().catch に届かない)。失敗時は入力・出力とも
+ * 破棄してから呼び出し元へ投げ直す。
+ */
+async function filterInto(srcFile, dstFile, keepLine) {
+  const out = fs.createWriteStream(dstFile);
+  const outFailed = new Promise((_resolve, reject) => {
+    out.once('error', reject);
+  });
+  let seen = 0;
+  let kept = 0;
+  try {
+    await Promise.race([
+      (async () => {
+        await streamLines(srcFile, async (line) => {
+          seen += 1;
+          if (keepLine(line)) {
+            await writeLine(out, line);
+            kept += 1;
+          }
+        });
+        out.end();
+        await finished(out);
+      })(),
+      outFailed
+    ]);
+  } catch (err) {
+    out.destroy();
+    throw err;
+  }
+  return { seen, kept };
+}
+
 async function main() {
   const args = parseArgs();
   if (args.help || !args.src || !args.dst || !args.bbox) {
@@ -113,43 +151,33 @@ async function main() {
 
   const t0 = Date.now();
   const keepIds = new Set();
-  const nodesOut = fs.createWriteStream(path.join(args.dst, 'nodes.ndjson'));
 
   process.stderr.write('[pass 1/2] filtering nodes by bbox\n');
-  let nodesSeen = 0;
-  let nodesKept = 0;
-  await streamLines(path.join(args.src, 'nodes.ndjson'), async (line) => {
-    nodesSeen += 1;
-    const n = JSON.parse(line);
-    if (
-      n.lon >= bbox.minLon && n.lon <= bbox.maxLon &&
-      n.lat >= bbox.minLat && n.lat <= bbox.maxLat
-    ) {
-      keepIds.add(n.id);
-      await writeLine(nodesOut, line);
-      nodesKept += 1;
+  const nodes = await filterInto(
+    path.join(args.src, 'nodes.ndjson'),
+    path.join(args.dst, 'nodes.ndjson'),
+    (line) => {
+      const n = JSON.parse(line);
+      const inside =
+        n.lon >= bbox.minLon && n.lon <= bbox.maxLon &&
+        n.lat >= bbox.minLat && n.lat <= bbox.maxLat;
+      if (inside) keepIds.add(n.id);
+      return inside;
     }
-  });
-  nodesOut.end();
-  await finished(nodesOut);
-  process.stderr.write(`  nodes ${nodesKept}/${nodesSeen} in ${Date.now() - t0}ms\n`);
+  );
+  process.stderr.write(`  nodes ${nodes.kept}/${nodes.seen} in ${Date.now() - t0}ms\n`);
 
-  const edgesOut = fs.createWriteStream(path.join(args.dst, 'edges.ndjson'));
-  let edgesSeen = 0;
-  let edgesKept = 0;
   const t1 = Date.now();
   process.stderr.write('[pass 2/2] filtering edges (both endpoints in bbox)\n');
-  await streamLines(path.join(args.src, 'edges.ndjson'), async (line) => {
-    edgesSeen += 1;
-    const e = JSON.parse(line);
-    if (keepIds.has(e.from) && keepIds.has(e.to)) {
-      await writeLine(edgesOut, line);
-      edgesKept += 1;
+  const edges = await filterInto(
+    path.join(args.src, 'edges.ndjson'),
+    path.join(args.dst, 'edges.ndjson'),
+    (line) => {
+      const e = JSON.parse(line);
+      return keepIds.has(e.from) && keepIds.has(e.to);
     }
-  });
-  edgesOut.end();
-  await finished(edgesOut);
-  process.stderr.write(`  edges ${edgesKept}/${edgesSeen} in ${Date.now() - t1}ms\n`);
+  );
+  process.stderr.write(`  edges ${edges.kept}/${edges.seen} in ${Date.now() - t1}ms\n`);
   process.stderr.write(`done in ${((Date.now() - t0) / 1000).toFixed(1)}s\n`);
 }
 
