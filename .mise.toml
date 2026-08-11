@@ -17,6 +17,9 @@
 # === JavaScript / TypeScript ===
 node = "22.22.3"
 
-# === Rust toolchain (rust-router/) ===
+# === Rust toolchain ===
+# Rust 実装は ochanuco/cycling-router へ移動し、WASM は Release から取得する
+# (npm run wasm:fetch) ため、このリポジトリのビルドに Rust は不要になった。
+# ベンチや CH 前計算をローカルで回すとき用に残している。
 rust = "1.94.1"
 "cargo:wasm-pack" = "0.15.0"

@@ -6,7 +6,7 @@
 //
 // 期待: WASM が JS 比 5-10x 速い。
 
-const { route_distances } = require('../rust-router/pkg-node/rust_router.js');
+const { route_distances } = require('../vendor/wasm/nodejs/router_wasm.js');
 const path = require('path');
 
 // JS 版 (frontend/route_math.js と同じ実装)

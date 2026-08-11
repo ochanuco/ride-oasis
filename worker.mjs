@@ -10,13 +10,16 @@ import mapData from './lib/map_data.js';
 import tiledRouterModule from './lib/cycling/tiled_router.js';
 import tileLoaderModule from './lib/cycling/tile_loader.js';
 import dnfPackModule from './lib/cycling/dnf_pack.js';
-// Rust WASM router. wasm-pack 標準の rust_router.js は `import * as wasm
-// from "./*.wasm"` の namespace-import を使い、Cloudflare Workers Builds
-// の bundler では受け付けられない。代わりに rust_router_worker.js が
-// `[[rules]] CompiledWasm` 経由で WebAssembly.Module を受け取り Instance 化
-// する手書き wrapper。route_ch(buffers, fromLon, fromLat, toLon, toLat,
-// maxSnapM) → { distance, coords, ... } を返す同期関数。
-import { route_ch as wasmRouteCh, route_distances as wasmRouteDistances } from './rust-router/pkg/rust_router_worker.js';
+// Rust WASM router (ochanuco/cycling-router)。wasm-pack 標準の router_wasm.js は
+// `import * as wasm from "./*.wasm"` の namespace-import を使い、Cloudflare
+// Workers Builds の bundler では受け付けられない。代わりに
+// router_wasm_worker.js が `[[rules]] CompiledWasm` 経由で WebAssembly.Module
+// を受け取り Instance 化する手書き wrapper。route_ch(buffers, fromLon, fromLat,
+// toLon, toLat, maxSnapM) → { distance, coords, ... } を返す同期関数。
+//
+// vendor/wasm/ は git 管理外で、wrangler.toml の [build] が Release から取得
+// して配置する (scripts/fetch_wasm.mjs)。
+import { route_ch as wasmRouteCh, route_distances as wasmRouteDistances } from './vendor/wasm/bundler/router_wasm_worker.js';
 
 const {
   parseSupplyPointFilters,

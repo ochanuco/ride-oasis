@@ -1,8 +1,7 @@
 // Benchmarks JS aStarOnView vs Rust/WASM astar() on synthetic graphs.
 //
-// Prereq: build the Rust crate first.
-//   mise exec -- wasm-pack build --target nodejs --release \
-//     --manifest-path rust-router/Cargo.toml
+// Prereq: fetch the WASM artifacts first.
+//   npm run wasm:fetch   (ochanuco/cycling-router の Release から取得)
 //
 // Run:
 //   node scripts/bench_wasm_vs_js.mjs
@@ -13,8 +12,8 @@ import { performance } from 'node:perf_hooks';
 const require = createRequire(import.meta.url);
 const { aStarOnView } = require('../lib/cycling/tiled_router');
 
-// rust-router wasm-pack output (pkg/ folder)
-const wasm = require('../rust-router/pkg/rust_router.js');
+// cycling-router の wasm-pack nodejs 出力 (vendor/wasm/nodejs)
+const wasm = require('../vendor/wasm/nodejs/router_wasm.js');
 
 function buildGridView(W) {
   // W x W grid, lon/lat increments of 0.001° (~111m)

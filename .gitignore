@@ -12,6 +12,12 @@ data/
 .wrangler/
 cloudflare/seed.sql
 
+# WASM 成果物は ochanuco/cycling-router の GitHub Release から取得する。
+# wrangler.toml の [build] が scripts/fetch_wasm.mjs を呼んで配置するため、
+# リポジトリには含めない。
+vendor/wasm/
+frontend/wasm/
+
 # .claude is ignored by ~/.config/git/ignore — re-allow shared Claude Code config
 !.claude/
 .claude/settings.local.json
