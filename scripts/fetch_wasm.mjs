@@ -9,9 +9,11 @@
 // `wrangler dev` / `wrangler deploy` でも Workers Builds (Cloudflare の CI) でも
 // 同じ経路で揃う。
 //
-// バージョンは下の VERSION でピン留めする。上げるときはここを書き換える。
+// バージョンは下の VERSION でピン留めする。上げるときは VERSION と SHA256 を
+// セットで書き換える (SHA256 は `shasum -a 256 <アーカイブ>` で得る)。
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -21,6 +23,10 @@ const VERSION = 'v0.3.0';
 const REPO = 'ochanuco/cycling-router';
 const ASSET = `cycling-router-wasm-${VERSION}.tar.gz`;
 const URL = `https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}`;
+// 取得したアーカイブの検証用ダイジェスト。展開前に照合し、不一致なら中断する。
+// Release の差し替えや取得経路の改竄があれば、tar を展開して JS wrapper と
+// WASM を配置する前に気づける。
+const SHA256 = '2b0db3bd74da360359b9c9083b56ff89cd5f1b6ba951c31e0b3fc54464feba09';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VENDOR = path.join(ROOT, 'vendor', 'wasm');
@@ -33,6 +39,7 @@ const REQUIRED = [
   [VENDOR, 'bundler', 'router_wasm_bg.js'],
   [VENDOR, 'bundler', 'router_wasm_bg.wasm'],
   [VENDOR, 'nodejs', 'router_wasm.js'],
+  [VENDOR, 'nodejs', 'router_wasm_bg.wasm'],
   [FRONTEND_WASM, 'router_wasm.js'],
   [FRONTEND_WASM, 'router_wasm_bg.wasm']
 ];
@@ -56,7 +63,32 @@ function main() {
   process.stdout.write(`fetching ${URL}\n`);
   // curl は Workers Builds のビルドイメージにも入っている。-f で HTTP エラーを
   // 終了コードに反映させ、リダイレクト (-L) を追う。
-  execFileSync('curl', ['-fsSL', '-o', archive, URL], { stdio: ['ignore', 'inherit', 'inherit'] });
+  //
+  // ネットワークが不安定でもビルドが無限に待たないよう上限を設ける。
+  // --retry-max-time が再試行全体の上限なので、最終試行の後に無駄な待機は入らない。
+  execFileSync(
+    'curl',
+    [
+      '-fsSL',
+      '--connect-timeout', '10',
+      '--max-time', '120',
+      '--retry', '3',
+      '--retry-delay', '2',
+      '--retry-max-time', '180',
+      '-o', archive,
+      URL
+    ],
+    { stdio: ['ignore', 'inherit', 'inherit'] }
+  );
+
+  // 展開前に検証する。tar は書庫の内容をそのままファイルとして書き出すため、
+  // 検証を後回しにすると改竄されたアーカイブを一度ディスクに展開してしまう。
+  const digest = createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+  if (digest !== SHA256) {
+    throw new Error(
+      `checksum mismatch for ${ASSET}\n  expected: ${SHA256}\n  actual:   ${digest}`
+    );
+  }
 
   const extracted = path.join(tmp, 'x');
   fs.mkdirSync(extracted, { recursive: true });
