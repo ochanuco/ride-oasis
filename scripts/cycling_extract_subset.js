@@ -43,19 +43,44 @@ function parseBbox(str) {
 // onLine を await する。呼び出し側が書き込みの drain を待てるようにして、
 // 1GB 級の ndjson でも出力側のバッファが際限なく膨らまないようにする。
 async function streamLines(filePath, onLine) {
-  const rl = readline.createInterface({
-    input: fs.createReadStream(filePath, { encoding: 'utf8' }),
-    crlfDelay: Infinity
+  const input = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input, crlfDelay: Infinity });
+  // 入力ストリームのエラー (ENOENT / EACCES など) を明示的に拾って reject する。
+  // readline 経由の伝播に頼ると、失敗が握り潰されて「0 件抽出で成功」に
+  // 見えかねない。
+  const failed = new Promise((_resolve, reject) => {
+    input.once('error', reject);
   });
-  for await (const line of rl) {
-    if (!line) continue;
-    await onLine(line);
+  const consume = (async () => {
+    for await (const line of rl) {
+      if (!line) continue;
+      await onLine(line);
+    }
+  })();
+  try {
+    await Promise.race([consume, failed]);
+  } finally {
+    rl.close();
+    input.destroy();
   }
 }
 
 /** write() が false を返したら drain を待つ (バックプレッシャー)。 */
 async function writeLine(stream, line) {
   if (!stream.write(line + '\n')) await once(stream, 'drain');
+}
+
+/**
+ * 比較用にパスを正規化する。symlink を解決したいが、dst はまだ存在しない
+ * ことがあるので、その場合は絶対パスのまま返す。
+ */
+function canonicalPath(p) {
+  const abs = path.resolve(p);
+  try {
+    return fs.realpathSync(abs);
+  } catch {
+    return abs;
+  }
 }
 
 async function main() {
@@ -76,7 +101,9 @@ async function main() {
 
   // src と dst が同じだと、読みながら同じファイルを truncate して元データを
   // 壊す。1GB 級の抽出元を失うと再取得コストが大きいので、書き始める前に弾く。
-  if (path.resolve(args.src) === path.resolve(args.dst)) {
+  // path.resolve だけでは symlink 経由の別名 (data/cycling と data/alias が
+  // 同じ実体) をすり抜けるため、実在するパスは realpath まで解決して比べる。
+  if (canonicalPath(args.src) === canonicalPath(args.dst)) {
     process.stderr.write('--src and --dst must differ (would overwrite the source)\n');
     process.exitCode = 1;
     return;

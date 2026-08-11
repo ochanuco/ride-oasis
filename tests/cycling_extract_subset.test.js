@@ -157,3 +157,26 @@ test('抽出: bbox が不正なら異常終了する', (t) => {
 
   assert.throws(() => runExtract(src, dst, '135.4,,135.6,34.8'));
 });
+
+test('抽出: symlink 経由で src と dst が同じ実体でも中断する', (t) => {
+  const nodes = [{ id: 1, lon: 135.5, lat: 34.7 }];
+  const { dir, src } = makeFixture(nodes, [{ from: 1, to: 1, cost_m: 1 }]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // path.resolve だけでは別パスに見えるが、実体は src と同じ
+  const alias = path.join(dir, 'alias');
+  fs.symlinkSync(src, alias);
+
+  const before = fs.readFileSync(path.join(src, 'nodes.ndjson'), 'utf8');
+  assert.throws(() => runExtract(src, alias, '135.4,34.6,135.6,34.8'));
+  assert.equal(fs.readFileSync(path.join(src, 'nodes.ndjson'), 'utf8'), before);
+});
+
+test('抽出: 入力 ndjson が無ければ異常終了する (無言で 0 件成功にしない)', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-subset-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, 'src');
+  fs.mkdirSync(src, { recursive: true });
+
+  assert.throws(() => runExtract(src, path.join(dir, 'dst'), '135.4,34.6,135.6,34.8'));
+});
