@@ -8,6 +8,7 @@ const {
   buildEdges,
   collectReferencedNodeIds
 } = require('../lib/cycling/graph_builder');
+const { COST_FACTOR } = require('../lib/cycling/tag_classifier');
 
 function nodeMap(entries) {
   return new Map(entries);
@@ -32,7 +33,10 @@ test('単一way: residentialの3ノード列から2エッジ生成', () => {
   );
   for (const e of edges) {
     assert.ok(e.length_m > 0);
-    assert.equal(e.cost_m, e.length_m * 0.9);
+    // 係数そのものは tag_classifier の責務。ここで見たいのは
+    // cost_m = length_m * COST_FACTOR[kind] という関係が成り立つことなので、
+    // 数値をリテラルで固定せず COST_FACTOR を参照する。
+    assert.equal(e.cost_m, e.length_m * COST_FACTOR.residential);
     assert.equal(e.kind, 'residential');
     assert.equal(e.oneway, false);
     assert.equal(e.way_id, 1);

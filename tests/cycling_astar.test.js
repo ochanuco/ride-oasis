@@ -140,6 +140,21 @@ test('MIN_COST_FACTOR は 0.7 (cycleway 相当, admissibility 保証)', () => {
   assert.equal(MIN_COST_FACTOR, 0.7);
 });
 
+test('MIN_COST_FACTOR は COST_FACTOR の最小値以下 (A* の admissibility)', () => {
+  // heuristic は haversine * MIN_COST_FACTOR。これより安い道が 1 種類でも
+  // あると heuristic が実コストを上回りうる = admissible でなくなり、A* が
+  // 最短でない経路を「最短」として返す。値の同期をリテラルで固定するのでは
+  // なく、実際の COST_FACTOR から検証する。
+  const { COST_FACTOR } = require('../lib/cycling/tag_classifier');
+  const factors = Object.values(COST_FACTOR);
+  assert.ok(factors.length > 0);
+  const min = Math.min(...factors);
+  assert.ok(
+    MIN_COST_FACTOR <= min,
+    `MIN_COST_FACTOR (${MIN_COST_FACTOR}) が COST_FACTOR の最小値 (${min}) を上回っている`
+  );
+});
+
 test('aStarOnView: 旧形式 view (nodeIdToIndex/indexToNodeId 無し) でも動く', () => {
   // 外部から手作りされた view (TileLoader を介さない) は sidecar を持たない
   // ことがある。後方互換のため即時クラッシュではなくフォールバックで index
