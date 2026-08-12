@@ -141,10 +141,15 @@ test('MIN_COST_FACTOR は 0.7 (cycleway 相当, admissibility 保証)', () => {
 });
 
 test('MIN_COST_FACTOR は COST_FACTOR の最小値以下 (A* の admissibility)', () => {
-  // heuristic は haversine * MIN_COST_FACTOR。これより安い道が 1 種類でも
-  // あると heuristic が実コストを上回りうる = admissible でなくなり、A* が
-  // 最短でない経路を「最短」として返す。値の同期をリテラルで固定するのでは
-  // なく、実際の COST_FACTOR から検証する。
+  // heuristic は「直線距離 * MIN_COST_FACTOR」。直線距離は equirectangular
+  // 近似 (Math.hypot(dxm, dym)) で、aStarOnView / bidiDijkstraOnView とも同じ
+  // 式を使う (bidi 側のローカル関数は haversineTo という名前だが中身は同じ
+  // 平面近似)。
+  //
+  // MIN_COST_FACTOR より安い係数が 1 種類でもあると heuristic が実コストを
+  // 上回りうる = admissible でなくなり、A* が最短でない経路を「最短」として
+  // 返す。値の同期をリテラルで固定するのではなく、実際の COST_FACTOR から
+  // 検証する。
   const { COST_FACTOR } = require('../lib/cycling/tag_classifier');
   const factors = Object.values(COST_FACTOR);
   assert.ok(factors.length > 0);
