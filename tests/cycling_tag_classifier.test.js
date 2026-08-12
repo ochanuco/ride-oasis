@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { classifyWay, isOneway } = require('../lib/cycling/tag_classifier');
+const { classifyWay, isOneway, COST_FACTOR } = require('../lib/cycling/tag_classifier');
 
 test('高速道路は自転車不可', () => {
   const r = classifyWay({ highway: 'motorway' });
@@ -18,16 +18,37 @@ test('国道(primary)は通行可で重みは長め', () => {
   assert.ok(r.costFactor > 1.0);
 });
 
-test('住宅街(residential)は通行可で重みは軽め', () => {
+test('住宅街(residential)は通行可だが最短距離より不利', () => {
+  // 1.0 未満だと「生活道路のためなら遠回りしてでも入る」という意味になり、
+  // 経路が住宅地の細道を積極的に選ぶ (#96)。
   const r = classifyWay({ highway: 'residential' });
   assert.equal(r.allowed, true);
-  assert.ok(r.costFactor <= 1.0);
+  assert.ok(r.costFactor > 1.0, `residential は 1.0 超であるべき: ${r.costFactor}`);
+});
+
+test('住宅街(residential)は幹線道路よりは軽い', () => {
+  // 避けたいが、幹線道路に追い出すほどではない。この順序が崩れると
+  // 「幹線道路を除く」意図と衝突する。
+  const residential = classifyWay({ highway: 'residential' });
+  const secondary = classifyWay({ highway: 'secondary' });
+  const primary = classifyWay({ highway: 'primary' });
+  assert.ok(residential.costFactor < secondary.costFactor);
+  assert.ok(secondary.costFactor < primary.costFactor);
+});
+
+test('living_street は residential と同じ重み', () => {
+  const living = classifyWay({ highway: 'living_street' });
+  const residential = classifyWay({ highway: 'residential' });
+  assert.equal(living.costFactor, residential.costFactor);
 });
 
 test('cycleway は最も軽い重み', () => {
   const r = classifyWay({ highway: 'cycleway' });
   assert.equal(r.allowed, true);
-  assert.ok(r.costFactor < 0.9);
+  const others = Object.entries(COST_FACTOR).filter(([kind]) => kind !== 'cycleway');
+  for (const [kind, factor] of others) {
+    assert.ok(r.costFactor < factor, `cycleway は ${kind} (${factor}) より軽いはず`);
+  }
 });
 
 test('footway は bicycle=yes でのみ通行可', () => {
