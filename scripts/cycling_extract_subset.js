@@ -176,7 +176,10 @@ async function filterInto(srcFile, dstFile, keepLine) {
     // dstFile として見えてしまう。
     fs.renameSync(tmpFile, dstFile);
   } catch (err) {
-    out.destroy();
+    // destroy() は非同期で、fd が閉じるのは 'close' の時点。開いたままの
+    // ファイルを unlink できない環境ではここで削除に失敗し、エラーを握り
+    // 潰しているため一時ファイルが残る。close を待ってから片付ける。
+    await closeStream(out);
     try {
       fs.unlinkSync(tmpFile);
     } catch {
@@ -185,6 +188,18 @@ async function filterInto(srcFile, dstFile, keepLine) {
     throw err;
   }
   return { seen, kept };
+}
+
+/** ストリームを破棄し、fd が閉じる ('close') まで待つ。 */
+async function closeStream(stream) {
+  if (stream.closed) return;
+  stream.destroy();
+  if (stream.closed) return;
+  try {
+    await once(stream, 'close');
+  } catch {
+    // destroy() が 'error' を再送した場合。呼び出し元の元エラーを優先する。
+  }
 }
 
 async function main() {
