@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { parseArgs, parseBbox } = require('../scripts/cycling_extract_subset');
+const { parseArgs, parseBbox, findFileAliasing } = require('../scripts/cycling_extract_subset');
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'cycling_extract_subset.js');
 
@@ -184,16 +184,75 @@ test('抽出: 入力 ndjson が無ければ異常終了する (無言で 0 件�
 test('抽出: 出力先に書けない場合も異常終了する', (t) => {
   const nodes = [{ id: 1, lon: 135.5, lat: 34.7 }];
   const { dir, src, dst } = makeFixture(nodes, []);
-  t.after(() => {
-    fs.chmodSync(dst, 0o755);
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  // 出力ディレクトリを読み取り専用にして createWriteStream を失敗させる。
-  // 'error' に購読者がいないと Node がプロセスごと落とすため、main().catch まで
-  // 届くことをここで担保する。
-  fs.mkdirSync(dst, { recursive: true });
-  fs.chmodSync(dst, 0o500);
+  // 出力パスをディレクトリとして先に作り、createWriteStream を EISDIR で
+  // 失敗させる。'error' に購読者がいないと Node がプロセスごと落とすため、
+  // main().catch まで届くことをここで担保する。
+  //
+  // chmod で書き込み不可にする方法は root だと権限が無視されて偽陰性になる。
+  // パス衝突なら実行ユーザに依存しない。
+  fs.mkdirSync(path.join(dst, 'nodes.ndjson'), { recursive: true });
 
   assert.throws(() => runExtract(src, dst, '135.4,34.6,135.6,34.8'));
+});
+
+test('抽出: dst のファイルが src のファイルへのハードリンクなら中断する', (t) => {
+  const nodes = [{ id: 1, lon: 135.5, lat: 34.7 }];
+  const { dir, src, dst } = makeFixture(nodes, [{ from: 1, to: 1, cost_m: 1 }]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // ディレクトリは別なので realpath 比較はすり抜ける。ハードリンクは
+  // realpath でも解決されないため dev/ino でしか気づけない。
+  fs.mkdirSync(dst, { recursive: true });
+  fs.linkSync(path.join(src, 'edges.ndjson'), path.join(dst, 'nodes.ndjson'));
+
+  const before = fs.readFileSync(path.join(src, 'edges.ndjson'), 'utf8');
+  assert.throws(() => runExtract(src, dst, '135.4,34.6,135.6,34.8'));
+  assert.equal(fs.readFileSync(path.join(src, 'edges.ndjson'), 'utf8'), before);
+});
+
+test('抽出: dst のファイルが src のファイルへの symlink なら中断する', (t) => {
+  const nodes = [{ id: 1, lon: 135.5, lat: 34.7 }];
+  const { dir, src, dst } = makeFixture(nodes, [{ from: 1, to: 1, cost_m: 1 }]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  fs.mkdirSync(dst, { recursive: true });
+  fs.symlinkSync(path.join(src, 'edges.ndjson'), path.join(dst, 'nodes.ndjson'));
+
+  const before = fs.readFileSync(path.join(src, 'edges.ndjson'), 'utf8');
+  assert.throws(() => runExtract(src, dst, '135.4,34.6,135.6,34.8'));
+  assert.equal(fs.readFileSync(path.join(src, 'edges.ndjson'), 'utf8'), before);
+});
+
+test('抽出: pass 2 でだけ衝突する場合も pass 1 を書く前に中断する', (t) => {
+  const nodes = [{ id: 1, lon: 135.5, lat: 34.7 }];
+  const { dir, src, dst } = makeFixture(nodes, [{ from: 1, to: 1, cost_m: 1 }]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // 衝突するのは edges (pass 2) の側だけ。検査が pass ごとだと nodes を
+  // 書き終えてから壊れるので、開始前にまとめて弾けていることを見る。
+  fs.mkdirSync(dst, { recursive: true });
+  fs.linkSync(path.join(src, 'edges.ndjson'), path.join(dst, 'edges.ndjson'));
+
+  const before = fs.readFileSync(path.join(src, 'edges.ndjson'), 'utf8');
+  assert.throws(() => runExtract(src, dst, '135.4,34.6,135.6,34.8'));
+  assert.equal(fs.readFileSync(path.join(src, 'edges.ndjson'), 'utf8'), before);
+  // nodes.ndjson にも一切書いていない
+  assert.equal(fs.existsSync(path.join(dst, 'nodes.ndjson')), false);
+});
+
+test('findFileAliasing: 実体が重ならなければ null', (t) => {
+  const { dir, src, dst } = makeFixture([{ id: 1, lon: 135.5, lat: 34.7 }], []);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(dst, { recursive: true });
+  fs.writeFileSync(path.join(dst, 'nodes.ndjson'), '');
+
+  assert.equal(
+    findFileAliasing(
+      [path.join(src, 'nodes.ndjson'), path.join(src, 'edges.ndjson')],
+      [path.join(dst, 'nodes.ndjson'), path.join(dst, 'edges.ndjson')]
+    ),
+    null
+  );
 });
