@@ -39,6 +39,19 @@ function runExtract(src, dst, bbox) {
   });
 }
 
+/**
+ * fn が投げた例外を返す。assert.throws は捕捉した Error を返さないため、
+ * 失敗理由 (stderr) まで検証したいときはこちらを使う。
+ */
+function catchRun(fn) {
+  try {
+    fn();
+  } catch (err) {
+    return err;
+  }
+  assert.fail('expected the command to fail, but it succeeded');
+}
+
 test('parseArgs: --src / --dst / --bbox を読み取る', () => {
   const r = parseArgs(['--src', 'data/cycling', '--dst', 'data/cycling-osaka', '--bbox', '135.4,34.6,135.6,34.8']);
   assert.equal(r.src, 'data/cycling');
@@ -186,7 +199,7 @@ test('抽出: 出力先に書けない場合も異常終了する', (t) => {
   const { dir, src, dst } = makeFixture(nodes, []);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  // 出力パスをディレクトリとして先に作り、createWriteStream を EISDIR で
+  // 出力パスをディレクトリとして先に作り、一時ファイルからの rename を EISDIR で
   // 失敗させる。'error' に購読者がいないと Node がプロセスごと落とすため、
   // main().catch まで届くことをここで担保する。
   //
@@ -194,7 +207,39 @@ test('抽出: 出力先に書けない場合も異常終了する', (t) => {
   // パス衝突なら実行ユーザに依存しない。
   fs.mkdirSync(path.join(dst, 'nodes.ndjson'), { recursive: true });
 
+  // assert.throws だけだと「何かで落ちた」しか言えず、bbox 不正など別の理由で
+  // 落ちても通ってしまう。想定した失敗であることを stderr で固定する。
+  const err = catchRun(() => runExtract(src, dst, '135.4,34.6,135.6,34.8'));
+  assert.match(err.stderr, /\bEISDIR\b/);
+});
+
+test('抽出: 途中で失敗しても既存の出力を壊さず一時ファイルも残さない', (t) => {
+  const { dir, src, dst } = makeFixture([{ id: 1, lon: 135.5, lat: 34.7 }], []);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  // pass 1 の途中で JSON.parse を失敗させる
+  fs.appendFileSync(path.join(src, 'nodes.ndjson'), 'not json\n');
+
+  // 前回の抽出結果に見立てた既存の出力
+  fs.mkdirSync(dst, { recursive: true });
+  const previous = '{"id":999,"lon":135.5,"lat":34.7}\n';
+  fs.writeFileSync(path.join(dst, 'nodes.ndjson'), previous);
+
   assert.throws(() => runExtract(src, dst, '135.4,34.6,135.6,34.8'));
+
+  // 一時ファイルに書いてから rename するので、既存の出力は無傷のまま
+  assert.equal(fs.readFileSync(path.join(dst, 'nodes.ndjson'), 'utf8'), previous);
+  assert.deepEqual(fs.readdirSync(dst).filter((f) => f.includes('.tmp-')), []);
+});
+
+test('抽出: 成功時に一時ファイルを残さない', (t) => {
+  const nodes = [{ id: 1, lon: 135.5, lat: 34.7 }];
+  const { dir, src, dst } = makeFixture(nodes, [{ from: 1, to: 1, cost_m: 1 }]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  runExtract(src, dst, '135.4,34.6,135.6,34.8');
+
+  assert.deepEqual(fs.readdirSync(dst).sort(), ['edges.ndjson', 'nodes.ndjson']);
 });
 
 test('抽出: dst のファイルが src のファイルへのハードリンクなら中断する', (t) => {

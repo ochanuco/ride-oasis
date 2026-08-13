@@ -125,17 +125,33 @@ function findFileAliasing(srcFiles, dstFiles) {
   return null;
 }
 
+let tmpSeq = 0;
+
 /**
  * srcFile を 1 行ずつ読み、keepLine が true を返した行だけ dstFile に書く。
  * 返り値は { seen, kept }。
  *
+ * 書き込みは dstFile と同じディレクトリの一時ファイルに対して行い、書き終えて
+ * から rename で dstFile を置き換える。dstFile を直接開かない理由は 2 つ。
+ *
+ *   - findFileAliasing の検査から createWriteStream までの間に出力パスが入力
+ *     ファイルへの symlink / ハードリンクへ差し替わると、既定の 'w' フラグが
+ *     入力を truncate する。rename が置き換えるのは symlink エントリ自体で、
+ *     リンク先の実体には触れない。
+ *   - 途中で失敗しても、既存の出力が中途半端に truncate された状態で残らない。
+ *
+ * 一時ファイルは 'wx' (O_CREAT|O_EXCL) で開く。既存パスがあれば失敗するので、
+ * 一時パスを先回りして symlink にされていても追従しない。
+ *
  * 出力ストリームの error は生成直後に購読する。write() は成功しても後から
  * ENOSPC 等で落ちることがあり、'error' に購読者がいないと Node が例外を
  * 投げてプロセスごと死ぬ (main().catch に届かない)。失敗時は入力・出力とも
- * 破棄してから呼び出し元へ投げ直す。
+ * 破棄し、一時ファイルを片付けてから呼び出し元へ投げ直す。
  */
 async function filterInto(srcFile, dstFile, keepLine) {
-  const out = fs.createWriteStream(dstFile);
+  tmpSeq += 1;
+  const tmpFile = `${dstFile}.tmp-${process.pid}-${tmpSeq}`;
+  const out = fs.createWriteStream(tmpFile, { flags: 'wx' });
   const outFailed = new Promise((_resolve, reject) => {
     out.once('error', reject);
   });
@@ -156,8 +172,16 @@ async function filterInto(srcFile, dstFile, keepLine) {
       })(),
       outFailed
     ]);
+    // finished(out) の後。ここより前に rename すると、書き込み途中の内容が
+    // dstFile として見えてしまう。
+    fs.renameSync(tmpFile, dstFile);
   } catch (err) {
     out.destroy();
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      // 一時ファイルを作れずに失敗した場合はここに来る。元の err を優先する。
+    }
     throw err;
   }
   return { seen, kept };
