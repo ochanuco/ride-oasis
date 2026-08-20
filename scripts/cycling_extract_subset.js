@@ -83,17 +83,75 @@ function canonicalPath(p) {
   }
 }
 
+/** ファイルの実体を一意に識別するキー。存在しなければ null。 */
+function fileIdentity(p) {
+  try {
+    // statSync は symlink を追うので、symlink とハードリンクの両方で
+    // 参照先の dev/ino が得られる。
+    const st = fs.statSync(p);
+    return `${st.dev}:${st.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 出力候補が入力候補と同じ実体を指していれば [dstFile, srcFile] を返す。
+ * 無ければ null。
+ *
+ * ディレクトリ単位の realpath 比較 (canonicalPath) では次がすり抜ける。
+ *
+ *   - dst/nodes.ndjson が src/edges.ndjson へのハードリンク
+ *     (ハードリンクは realpath では解決されない)
+ *   - dst/nodes.ndjson が src/edges.ndjson への symlink
+ *     (ディレクトリは別だがファイルの実体は同じ)
+ *
+ * どちらも「読みながら同じ実体を truncate する」経路なので、dev/ino で
+ * 突き合わせて弾く。nodes と edges は別パスで書くため、pass 1 の前に
+ * 全組み合わせをまとめて見る (pass 1 が通っても pass 2 で壊れうる)。
+ */
+function findFileAliasing(srcFiles, dstFiles) {
+  const bySrcIdentity = new Map();
+  for (const f of srcFiles) {
+    const id = fileIdentity(f);
+    if (id) bySrcIdentity.set(id, f);
+  }
+  for (const f of dstFiles) {
+    const id = fileIdentity(f);
+    if (!id) continue;
+    const hit = bySrcIdentity.get(id);
+    if (hit) return [f, hit];
+  }
+  return null;
+}
+
+let tmpSeq = 0;
+
 /**
  * srcFile を 1 行ずつ読み、keepLine が true を返した行だけ dstFile に書く。
  * 返り値は { seen, kept }。
  *
+ * 書き込みは dstFile と同じディレクトリの一時ファイルに対して行い、書き終えて
+ * から rename で dstFile を置き換える。dstFile を直接開かない理由は 2 つ。
+ *
+ *   - findFileAliasing の検査から createWriteStream までの間に出力パスが入力
+ *     ファイルへの symlink / ハードリンクへ差し替わると、既定の 'w' フラグが
+ *     入力を truncate する。rename が置き換えるのは symlink エントリ自体で、
+ *     リンク先の実体には触れない。
+ *   - 途中で失敗しても、既存の出力が中途半端に truncate された状態で残らない。
+ *
+ * 一時ファイルは 'wx' (O_CREAT|O_EXCL) で開く。既存パスがあれば失敗するので、
+ * 一時パスを先回りして symlink にされていても追従しない。
+ *
  * 出力ストリームの error は生成直後に購読する。write() は成功しても後から
  * ENOSPC 等で落ちることがあり、'error' に購読者がいないと Node が例外を
  * 投げてプロセスごと死ぬ (main().catch に届かない)。失敗時は入力・出力とも
- * 破棄してから呼び出し元へ投げ直す。
+ * 破棄し、一時ファイルを片付けてから呼び出し元へ投げ直す。
  */
 async function filterInto(srcFile, dstFile, keepLine) {
-  const out = fs.createWriteStream(dstFile);
+  tmpSeq += 1;
+  const tmpFile = `${dstFile}.tmp-${process.pid}-${tmpSeq}`;
+  const out = fs.createWriteStream(tmpFile, { flags: 'wx' });
   const outFailed = new Promise((_resolve, reject) => {
     out.once('error', reject);
   });
@@ -114,11 +172,34 @@ async function filterInto(srcFile, dstFile, keepLine) {
       })(),
       outFailed
     ]);
+    // finished(out) の後。ここより前に rename すると、書き込み途中の内容が
+    // dstFile として見えてしまう。
+    fs.renameSync(tmpFile, dstFile);
   } catch (err) {
-    out.destroy();
+    // destroy() は非同期で、fd が閉じるのは 'close' の時点。開いたままの
+    // ファイルを unlink できない環境ではここで削除に失敗し、エラーを握り
+    // 潰しているため一時ファイルが残る。close を待ってから片付ける。
+    await closeStream(out);
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      // 一時ファイルを作れずに失敗した場合はここに来る。元の err を優先する。
+    }
     throw err;
   }
   return { seen, kept };
+}
+
+/** ストリームを破棄し、fd が閉じる ('close') まで待つ。 */
+async function closeStream(stream) {
+  if (stream.closed) return;
+  stream.destroy();
+  if (stream.closed) return;
+  try {
+    await once(stream, 'close');
+  } catch {
+    // destroy() が 'error' を再送した場合。呼び出し元の元エラーを優先する。
+  }
 }
 
 async function main() {
@@ -149,13 +230,28 @@ async function main() {
 
   fs.mkdirSync(args.dst, { recursive: true });
 
+  const srcNodes = path.join(args.src, 'nodes.ndjson');
+  const srcEdges = path.join(args.src, 'edges.ndjson');
+  const dstNodes = path.join(args.dst, 'nodes.ndjson');
+  const dstEdges = path.join(args.dst, 'edges.ndjson');
+
+  // ディレクトリが別でも、ファイル単位で同じ実体を指していれば元データを壊す。
+  const alias = findFileAliasing([srcNodes, srcEdges], [dstNodes, dstEdges]);
+  if (alias) {
+    process.stderr.write(
+      `output ${alias[0]} is the same file as input ${alias[1]} (would overwrite the source)\n`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const t0 = Date.now();
   const keepIds = new Set();
 
   process.stderr.write('[pass 1/2] filtering nodes by bbox\n');
   const nodes = await filterInto(
-    path.join(args.src, 'nodes.ndjson'),
-    path.join(args.dst, 'nodes.ndjson'),
+    srcNodes,
+    dstNodes,
     (line) => {
       const n = JSON.parse(line);
       const inside =
@@ -170,8 +266,8 @@ async function main() {
   const t1 = Date.now();
   process.stderr.write('[pass 2/2] filtering edges (both endpoints in bbox)\n');
   const edges = await filterInto(
-    path.join(args.src, 'edges.ndjson'),
-    path.join(args.dst, 'edges.ndjson'),
+    srcEdges,
+    dstEdges,
     (line) => {
       const e = JSON.parse(line);
       return keepIds.has(e.from) && keepIds.has(e.to);
@@ -188,4 +284,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, parseBbox };
+module.exports = { parseArgs, parseBbox, findFileAliasing };
