@@ -35,10 +35,7 @@ pnpm run cf:seed:remote
 
 ## 通常のデプロイ
 
-```bash
-pnpm run cf:deploy
-# 既定では https://ride-oasis-map.<account>.workers.dev に公開
-```
+production へのデプロイは、GitHub Actions の `deploy` workflow を `main`（または main 上のコミット SHA）を指定して手動で実行する。Environment `production` の承認後に `scripts/deploy.sh production`（`pnpm exec wrangler deploy`）が走り、`wrangler.toml` の `[build]`（`pnpm run wasm:fetch`）が WASM 成果物を取得する。D1 migration はデプロイでは適用せず、migration を含む PR ごとに `pnpm run cf:migrate:remote` を手で実行する。
 
 カスタムドメインは `wrangler.toml` の `routes` か Cloudflare Dashboard 側で設定。
 
@@ -61,21 +58,21 @@ pnpm run cf:seed:remote
 
 cron や schedule 化したい場合は `pnpm run cf:export-seed && pnpm run cf:seed:remote` を GitHub Actions に乗せる。
 
-## Workers Builds (CF 純正の CI/CD で自動デプロイ)
+## Workers Builds (バージョンのアップロードと Preview)
 
-Cloudflare Dashboard 側の Workers Builds から GitHub リポジトリを連携すると、push 毎に自動でビルド/デプロイできる。設定値:
+Workers Builds は production への反映には使わない。設定値 (Cloudflare Dashboard):
 
-- **Workers & Pages → ride-oasis → Settings → Builds → Connect**
+- **Workers & Pages → ride-oasis → Settings → Builds**
 - **Repository**: `ochanuco/ride-oasis`
 - **Production branch**: `main`
 - **Build command** (任意、テスト実行する場合): `pnpm install --frozen-lockfile && pnpm test`
-- **Deploy command (production branch)**: `pnpm exec wrangler deploy`
+- **Deploy command (production branch)**: `pnpm exec wrangler versions upload`
 - **Deploy command (non-production branches)**: `pnpm exec wrangler versions upload`
 
-Production branch (main) への push は `wrangler deploy` で本番 (`https://ride-oasis.teacatus.workers.dev`) に直接反映、それ以外のブランチへの push は `wrangler versions upload` でバージョンが追加されるだけで本番には影響せず、`https://<version-id>-ride-oasis.teacatus.workers.dev` のプレビュー URL が払い出される。プレビューを本番昇格したいときは Dashboard か `pnpm exec wrangler versions deploy` を実行。
+どのブランチの push も `wrangler versions upload` でバージョンが追加されるだけで本番には影響せず、`https://<version-id>-ride-oasis.teacatus.workers.dev` のプレビュー URL が払い出される。本番への反映は `deploy` workflow か、Dashboard / `pnpm exec wrangler versions deploy` でのバージョン昇格で行う。
 
 ### 非本番ブランチで気をつけるポイント
-- `wrangler versions upload` は Worker 本体のコード/asset のみ更新する。`wrangler.toml` の binding 構造変更 (D1 追加など) は production deploy 経由でしか反映されない。
+- `wrangler versions upload` は Worker 本体のコード/asset のみ更新する。`wrangler.toml` の binding 構造変更 (D1 追加など) は `deploy` workflow 経由でしか反映されない。
 - D1 のスキーマ変更 (新マイグレーション) は preview に対しても適用が必要 (`wrangler d1 migrations apply rideoasis-supply-points --remote` をローカルで一度走らせれば preview/prod 両方が同じ DB を使うため反映される)。
 - D1 のデータ更新 (`cf:seed:remote`) は preview/prod で共有される。データを切り離したい場合は `[env.preview]` セクションを wrangler.toml に追加し別 D1 を bind する。
 - `cf:preview` をローカルで叩く場合と Workers Builds で走らせる場合で Worker Version ID が異なる。Dashboard 側の自動付与の Version ID をブックマークするのが楽。
