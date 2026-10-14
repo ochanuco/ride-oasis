@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - "package.json"
-      - "package-lock.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/dependency-review.yml"
       - ".github/dependency-review-config.yml"
 

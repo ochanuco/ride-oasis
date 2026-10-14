@@ -29,7 +29,7 @@ fi
 
 for f in "${files[@]}"; do
   echo "[upsert] ${f}"
-  npm run bq:upsert:geocoded -- \
+  pnpm run bq:upsert:geocoded \
     --project "$PROJECT_ID" \
     --dataset "$DATASET" \
     --table "$TABLE" \
