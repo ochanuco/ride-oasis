@@ -1,5 +1,5 @@
 -- Initial schema for the rideoasis-supply-points D1 database.
--- Mirrors the SQLite shape produced by `npm run export:map-db` so the Worker
+-- Mirrors the SQLite shape produced by `pnpm run export:map-db` so the Worker
 -- and the Node dev server share the same column names and indexes.
 
 CREATE TABLE IF NOT EXISTS supply_points (

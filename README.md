@@ -32,9 +32,9 @@ node scripts/michi_no_eki_pref_ndjson.js --pref kochi
 node scripts/ministop_pref_ndjson.js --pref osaka
 node scripts/7eleven_pref_ndjson.js --pref all
 node scripts/7eleven_pref_ndjson.js --pref-list
-npm run crawl:all
-npm run geocode:all
-npm run publish:all
+pnpm run crawl:all
+pnpm run geocode:all
+pnpm run publish:all
 ```
 
 補足:
@@ -48,7 +48,7 @@ npm run publish:all
 ローカルの住所データを使って geocode する場合（例）:
 
 ```bash
-npm run geocode:ndjson -- \
+pnpm run geocode:ndjson \
   --chain lawson \
   --input data/lawson/ndjson \
   --existing data/geocoded \
@@ -60,13 +60,13 @@ npm run geocode:ndjson -- \
 `geocode:all` でも環境変数で同じ指定ができます:
 
 ```bash
-JAPANESE_ADDRESSES_API=file:///path/to/japanese-addresses/api/ja npm run geocode:all
+JAPANESE_ADDRESSES_API=file:///path/to/japanese-addresses/api/ja pnpm run geocode:all
 ```
 
 取得済み NDJSON から `raw.stores_geocoded` 共通スキーマの NDJSON を作る:
 
 ```bash
-npm run geocode:ndjson -- \
+pnpm run geocode:ndjson \
   --chain lawson \
   --input data/lawson/ndjson \
   --existing data/geocoded \
@@ -80,7 +80,7 @@ npm run geocode:ndjson -- \
 mkdir -p /tmp/ride-oasis-check
 head -n 1 data/lawson/ndjson/stores_lawson_pref_13.ndjson > /tmp/ride-oasis-check/one_store.ndjson
 
-npm run geocode:ndjson -- \
+pnpm run geocode:ndjson \
   --chain lawson \
   --input /tmp/ride-oasis-check/one_store.ndjson \
   --output /tmp/ride-oasis-check/one_store_geocoded.ndjson \
@@ -92,7 +92,7 @@ cat /tmp/ride-oasis-check/one_store_geocoded.ndjson
 `raw.stores_geocoded` へ Upsert（`bq load` + `MERGE`）する:
 
 ```bash
-npm run bq:upsert:geocoded -- \
+pnpm run bq:upsert:geocoded \
   --project your-gcp-project \
   --dataset raw \
   --table stores_geocoded \
@@ -113,7 +113,7 @@ npm run bq:upsert:geocoded -- \
 1. BigQuery からローカル DB を作る
 
 ```bash
-npm run export:map-db -- \
+pnpm run export:map-db \
   --project your-gcp-project \
   --output ./.local/rideoasis-map.db
 ```
@@ -121,7 +121,7 @@ npm run export:map-db -- \
 2. ローカルサーバを起動する
 
 ```bash
-npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787
+pnpm run map:serve --db ./.local/rideoasis-map.db --port 8787
 ```
 
 3. ブラウザで `http://localhost:8787` を開き、GPX ファイルを選ぶ
@@ -134,17 +134,9 @@ npm run map:serve -- --db ./.local/rideoasis-map.db --port 8787
 
 ## 依存更新
 
-Renovate を使って npm 依存の更新 PR を作成します。リポジトリで Renovate GitHub App を有効化すると、ルートの [`renovate.json`](renovate.json) に従って運用されます。
+Renovate の設定は [`ochanuco/.github`](https://github.com/ochanuco/.github) の共通 preset を使い、ルートの [`renovate.json5`](renovate.json5) から参照します。
 
-- `dependencies` / `devDependencies` を分類して PR を作成
-- major update には `major` ラベルを追加
-- 公開直後の新規リリースは一定期間取り込まず、短時間の hijack や誤配布に巻き込まれにくくする
-- runtime 依存は `14 days`、dev 依存は `7 days` 待ってから更新候補にする
-- 複数依存の一括更新を避け、レビューしやすい粒度で PR を分ける
-- GitHub Actions は SHA 固定で管理し、`# vX.Y.Z` コメント付きの更新を Renovate に追従させる
-- lock file maintenance を毎月 1 回実行
-
-GitHub Actions では dependency review を有効化し、`package.json` / `package-lock.json` の差分に `high` 以上の既知脆弱性が入る PR をブロックします。`development` / `unknown` スコープも対象に含め、`actions/checkout` は `persist-credentials: false` で不要な認証情報の持ち回りを避けます。
+GitHub Actions では dependency review を有効化し、`package.json` / `pnpm-lock.yaml` の差分に `high` 以上の既知脆弱性が入る PR をブロックします。`development` / `unknown` スコープも対象に含め、`actions/checkout` は `persist-credentials: false` で不要な認証情報の持ち回りを避けます。
 
 ## point_level 閾値メモ
 

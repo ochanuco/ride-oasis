@@ -1,7 +1,7 @@
 // Benchmarks JS aStarOnView vs Rust/WASM astar() on synthetic graphs.
 //
 // Prereq: fetch the WASM artifacts first.
-//   npm run wasm:fetch   (ochanuco/cycling-router の Release から取得)
+//   pnpm run wasm:fetch   (ochanuco/cycling-router の Release から取得)
 //
 // Run:
 //   node scripts/bench_wasm_vs_js.mjs

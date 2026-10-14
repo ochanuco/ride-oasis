@@ -5,21 +5,20 @@
 #
 # JS / Rust 両側の開発環境を mise 一本で揃える方針:
 #   mise install              # 全ツールを取得 (この .mise.toml に従う)
-#   mise exec -- npm ci       # JS 依存をインストール
+#   mise exec -- pnpm install --frozen-lockfile  # JS 依存をインストール
 #   mise exec -- cargo build  # Rust ビルド
-#   mise exec -- npm test     # ユニットテスト
+#   mise exec -- pnpm test     # ユニットテスト
 #
-# CI (.github/workflows/unit-tests.yml) は matrix の Node 22 / 24 を独立に
-# テストするため actions/setup-node のまま。ローカルでは mise が CI の
-# Node 22 (= 22.22.3) と一致する node を提供する。
+# CI (.github/workflows/ci.yml) は ochanuco/.github の pnpm.yml で Node 24 を使う。
+# ローカルでは mise が同じ Node 24 系の node を提供する。
 
 [tools]
 # === JavaScript / TypeScript ===
-node = "22.22.3"
+node = "24.21.0"
 
 # === Rust toolchain ===
 # Rust 実装は ochanuco/cycling-router へ移動し、WASM は Release から取得する
-# (npm run wasm:fetch) ため、このリポジトリのビルドに Rust は不要になった。
+# (pnpm run wasm:fetch) ため、このリポジトリのビルドに Rust は不要になった。
 # ベンチや CH 前計算をローカルで回すとき用に残している。
 rust = "1.94.1"
 "cargo:wasm-pack" = "0.15.0"
