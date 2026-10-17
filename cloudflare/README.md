@@ -35,7 +35,7 @@ pnpm run cf:seed:remote
 
 ## 通常のデプロイ
 
-production へのデプロイは、GitHub Actions の `deploy` workflow を `main`（または main 上のコミット SHA）を指定して手動で実行する。Environment `production` の承認後に `scripts/deploy.sh production`（`pnpm exec wrangler deploy`）が走り、`wrangler.toml` の `[build]`（`pnpm run wasm:fetch`）が WASM 成果物を取得する。D1 migration はデプロイでは適用せず、migration を含む PR ごとに `pnpm run cf:migrate:remote` を手で実行する。
+production へのデプロイは、main へのマージで、GitHub Actions の `deploy` workflow が本番に出す。承認が要るのは、前回の記録がない・ロールバック・手作業の要る変更（D1 migration など）を含むときだけで、Environment `production-approval` で止まる。何が出るかと承認の要否は、run の `plan` ジョブの Job Summary に出る。手動実行（入力 `ref` は main か main 上のコミット SHA）はロールバック用。`scripts/deploy.sh production`（`pnpm exec wrangler deploy`）が走り、`wrangler.toml` の `[build]`（`pnpm run wasm:fetch`）が WASM 成果物を取得する。D1 migration はデプロイでは適用せず、migration を含む PR ごとに `pnpm run cf:migrate:remote` を手で実行する。
 
 カスタムドメインは `wrangler.toml` の `routes` か Cloudflare Dashboard 側で設定。
 
