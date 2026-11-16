@@ -14,11 +14,11 @@
 
 [tools]
 # === JavaScript / TypeScript ===
-node = "24.21.0"
+node = "24.22.2"
 
 # === Rust toolchain ===
 # Rust 実装は ochanuco/cycling-router へ移動し、WASM は Release から取得する
 # (pnpm run wasm:fetch) ため、このリポジトリのビルドに Rust は不要になった。
 # ベンチや CH 前計算をローカルで回すとき用に残している。
-rust = "1.94.1"
-"cargo:wasm-pack" = "0.15.0"
+rust = "1.99.1"
+"cargo:wasm-pack" = "0.15.1"
