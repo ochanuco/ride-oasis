@@ -14,7 +14,7 @@
 
 [tools]
 # === JavaScript / TypeScript ===
-node = "24.22.2"
+node = "26.13.1"
 
 # === Rust toolchain ===
 # Rust 実装は ochanuco/cycling-router へ移動し、WASM は Release から取得する
