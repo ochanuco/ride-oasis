@@ -20,5 +20,5 @@ node = "26.13.1"
 # Rust 実装は ochanuco/cycling-router へ移動し、WASM は Release から取得する
 # (pnpm run wasm:fetch) ため、このリポジトリのビルドに Rust は不要になった。
 # ベンチや CH 前計算をローカルで回すとき用に残している。
-rust = "1.99.1"
+rust = "1.100.0"
 "cargo:wasm-pack" = "0.15.1"
